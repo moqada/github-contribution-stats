@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base data-ice="baseUrl">
+  <title data-ice="title">API Document</title>
+  <link type="text/css" rel="stylesheet" href="css/style.css">
+  <link type="text/css" rel="stylesheet" href="css/prettify-tomorrow.css">
+  <script src="script/prettify/prettify.js"></script>
+  
+  
+  <script src="script/manual.js"></script>
+</head>
+<body class="layout-container" data-ice="rootContainer">
+
+<header>
+  <a href="./">Home</a>
+  
+  <a href="identifiers.html">Reference</a>
+  <a href="source.html">Source</a>
+  <a href="test.html" data-ice="testLink">Test</a>
+  <a data-ice="repoURL" href="https://github.com/moqada/github-contribution-stats.git" class="repo-url-github">Repository</a>
+  <div class="search-box">
+  <span>
+    <img src="./image/search.png">
+    <span class="search-input-edge"></span><input class="search-input"><span class="search-input-edge"></span>
+  </span>
+    <ul class="search-result"></ul>
+  </div>
+</header>
+
+<nav class="navigation" data-ice="nav"><div>
+  <ul>
+    
+  <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchContributions">fetchContributions</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStats">fetchStats</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Stats">Stats</a></span></span></li>
+</ul>
+</div>
+</nav>
+
+<div class="content" data-ice="content"><div data-ice="index" class="github-markdown"><h1 id="github-contribution-stats">github-contribution-stats</h1>
+<p><a href="https://www.npmjs.com/package/github-contribution-stats"><img src="https://img.shields.io/npm/v/github-contribution-stats.svg?style=flat-square" alt="NPM version"></a>
+<a href="https://www.npmjs.com/package/github-contribution-stats"><img src="https://img.shields.io/npm/dt/github-contribution-stats.svg?style=flat-square" alt="NPM downloads"></a>
+<a href="https://travis-ci.org/moqada/github-contribution-stats"><img src="https://img.shields.io/travis/moqada/github-contribution-stats.svg?style=flat-square" alt="Build Status"></a>
+<a href="https://codecov.io/github/moqada/github-contribution-stats"><img src="https://img.shields.io/codecov/c/github/moqada/github-contribution-stats.svg?style=flat-square" alt="Coverage Status"></a>
+<a href="https://david-dm.org/moqada/github-contribution-stats"><img src="https://img.shields.io/david/moqada/github-contribution-stats.svg?style=flat-square" alt="Dependency Status"></a>
+<a href="https://david-dm.org/moqada/github-contribution-stats#info=devDependencies"><img src="https://img.shields.io/david/dev/moqada/github-contribution-stats.svg?style=flat-square" alt="DevDependency Status"></a>
+<a href="http://opensource.org/licenses/MIT"><img src="https://img.shields.io/npm/l/github-contribution-stats.svg?style=flat-square" alt="License"></a></p>
+<p>Fetch GitHub Contributions and Streaks from GitHub website.</p>
+<h2 id="installation">Installation</h2>
+<pre><code><code class="source-code prettyprint">npm install --save github-contribution-stats</code>
+</code></pre><h2 id="usage">Usage</h2>
+<h3 id="stats">Stats</h3>
+<p>Get user&apos;s Contributions and Streaks from GitHub.</p>
+<pre><code class="lang-javascript"><code class="source-code prettyprint">import {fetchStats} from &apos;github-contribution-stats&apos;;
+
+fetchStats(&apos;moqada&apos;).then(stats =&gt; console.log(stats));
+// {
+//   calendar: &apos;&lt;svg&gt;...&lt;/svg&gt;&apos;,
+//   contributions: [
+//     {
+//       date: &apos;2015-01-23&apos;,
+//       count: 0
+//     },
+//     ...
+//     {
+//       date: &apos;2016-01-23&apos;,
+//       count: 0
+//     }
+//   ],
+//   currentStreak: {
+//     days: 139,
+//     end: &apos;2016-01-22&apos;,
+//     start: &apos;2015-09-06&apos;
+//   },
+//   longestStreak: {
+//     days: 139,
+//     end: &apos;2016-01-22&apos;,
+//     start: &apos;2015-09-06&apos;
+//   },
+//   summary: {
+//     busiestDay: {
+//       date: &apos;2015-11-02&apos;,
+//       count: 34
+//     },
+//     end: &apos;2016-01-23&apos;,
+//     start: &apos;2015-01-23&apos;,
+//     total: 1271
+//   }
+// }</code>
+</code></pre>
+<h3 id="streaks">Streaks</h3>
+<p>Get uses&apos;s Streaks from GitHub.</p>
+<pre><code class="lang-javascript"><code class="source-code prettyprint">import {fetchStreaks} from &apos;github-contribution-stats&apos;;
+
+fetchStreaks(&apos;moqada&apos;).then(streaks =&gt; console.log(streaks));
+// {
+//   currentStreak: {
+//     days: 139,
+//     end: &apos;2016-01-22&apos;,
+//     start: &apos;2015-09-06&apos;
+//   },
+//   longestStreak: {
+//     days: 139,
+//     end: &apos;2016-01-22&apos;,
+//     start: &apos;2015-09-06&apos;
+//   }
+// }</code>
+</code></pre>
+<h3 id="streaks">Streaks</h3>
+<p>Get users&apos;s Contributions from GitHub.</p>
+<pre><code class="lang-javascript"><code class="source-code prettyprint">import {fetchContributions} from &apos;github-contribution-stats&apos;;
+
+fetchContributions(&apos;moqada&apos;).then(contributions =&gt; console.log(contributions));
+// {
+//   calendar: &apos;&lt;svg&gt;...&lt;/svg&gt;&apos;,
+//   contributions: [
+//     {
+//       date: &apos;2015-01-23&apos;,
+//       count: 0
+//     },
+//     ...
+//     {
+//       date: &apos;2016-01-23&apos;,
+//       count: 0
+//     }
+//   ]
+// }</code>
+</code></pre>
+<p>More detail, See <a href="https://moqada.github.io/github-contribution-stats/">Doc</a>.</p>
+</div>
+</div>
+
+<footer class="footer">
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.3)</span></a>
+</footer>
+
+<script src="script/search_index.js"></script>
+<script src="script/search.js"></script>
+<script src="script/pretty-print.js"></script>
+<script src="script/inherited-summary.js"></script>
+<script src="script/test-summary.js"></script>
+<script src="script/inner-link.js"></script>
+<script src="script/patch-for-local.js"></script>
+</body>
+</html>

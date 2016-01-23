@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base data-ice="baseUrl" href="../../">
+  <title data-ice="title">src/index.js | API Document</title>
+  <link type="text/css" rel="stylesheet" href="css/style.css">
+  <link type="text/css" rel="stylesheet" href="css/prettify-tomorrow.css">
+  <script src="script/prettify/prettify.js"></script>
+  
+  
+  <script src="script/manual.js"></script>
+</head>
+<body class="layout-container" data-ice="rootContainer">
+
+<header>
+  <a href="./">Home</a>
+  
+  <a href="identifiers.html">Reference</a>
+  <a href="source.html">Source</a>
+  <a href="test.html" data-ice="testLink">Test</a>
+  <a data-ice="repoURL" href="https://github.com/moqada/github-contribution-stats.git" class="repo-url-github">Repository</a>
+  <div class="search-box">
+  <span>
+    <img src="./image/search.png">
+    <span class="search-input-edge"></span><input class="search-input"><span class="search-input-edge"></span>
+  </span>
+    <ul class="search-result"></ul>
+  </div>
+</header>
+
+<nav class="navigation" data-ice="nav"><div>
+  <ul>
+    
+  <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchContributions">fetchContributions</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStats">fetchStats</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Stats">Stats</a></span></span></li>
+</ul>
+</div>
+</nav>
+
+<div class="content" data-ice="content"><h1 data-ice="title">src/index.js</h1>
+<pre class="source-code line-number raw-source-code"><code class="prettyprint linenums" data-ice="content">import fetch from &apos;isomorphic-fetch&apos;;
+import moment from &apos;moment&apos;;
+import cheerio from &apos;cheerio&apos;;
+
+const STATUS_OK = 200;
+const STATUS_NOT_FOUND = 404;
+
+/**
+ * @typedef {Object} Stats
+ * @property {Array&lt;{date: string, count: number}&gt;} contributions - List of contributions
+ * @property {CurrentStreak} currentStreak - Current streak
+ * @property {LongestStreak} longestStreak - Longest streak
+ * @property {Object} [summary] - Summary of contributions
+ * @property {string} summary.start - Start date of contributions
+ * @property {string} summary.end - End date of contributions
+ * @property {string} summary.total - Total contributions
+ * @property {?{date: string, count: number}} [summary.busiestDay] - Busiest day of contributions
+ * @propety {string} [calendar] - SVG of contributions calendar
+ *
+ * @example
+ * {
+ *   contributions: [
+ *     {date: &apos;2015-01-23&apos;, count: 0},
+ *     ...
+ *   ],
+ *   calendar: &apos;&lt;svg&gt;....&lt;/svg&gt;&apos;
+ *   currentStreak: {days: 0, end: null, start: null, last: &apos;2016-01-23T08:00:00Z&apos; },
+ *   longestStreak: {days: 5, end: &apos;2016-01-12&apos;, start: &apos;2016-01-16&apos; },
+ *   summary: {
+ *     busiestDay: {date: &apos;2015-11-02&apos;, count: 34},
+ *     end: &apos;2016-01-23&apos;,
+ *     start: &apos;2015-01-23&apos;,
+ *     total: 1271
+ *   }
+ * }
+ */
+/**
+ * @typedef {Object} CurrentStreak
+ * @property {number} days - Days
+ * @property {?string} end - End date
+ * @property {?string} start - Start date
+ * @property {?string} [last] - Last datetime of contribution when current streak is 0
+ */
+/**
+ * @typedef {Object} LongestStreak
+ * @property {number} days - Days
+ * @property {?string} end - End date
+ * @property {?string} start - Start date
+ */
+
+
+/**
+ * Fetch contributions and streaks of GitHub user
+ *
+ * @param {string} username GitHub username
+ * @param {Object} [opts] Options
+ * @param {boolean} [opts.summary=true] Flag of includes summary
+ * @return {Promise&lt;Stats, Error&gt;}
+ */
+export function fetchStats(username, {summary = true} = {}) {
+  return fetchContributions(username).then(contributionData =&gt; {
+    return fetchStreaks(username).then(streakData =&gt; {
+      return Object.assign({}, contributionData, streakData);
+    });
+  }).then(result =&gt; {
+    const res = Object.assign({}, result);
+    if (summary) {
+      return Object.assign({}, res, {summary: summarizeContributions(res.contributions)});
+    }
+    return res;
+  });
+}
+
+
+/**
+ * Fetch contributions of GitHub user
+ *
+ * @param {string} username - GitHub username
+ * @return {Promise&lt;{calendar: string, contributions: Array&lt;{date: string, count: number}&gt;}, Error&gt;}
+ */
+export function fetchContributions(username) {
+  return fetchGitHub(`https://github.com/users/${username}/contributions`)
+    .then(html =&gt; {
+      return {
+        calendar: html,
+        contributions: parseCalendar(cheerio(html))
+      };
+    });
+}
+
+
+/**
+ * Fetch streaks of GitHub user
+ *
+ * Sometimes, it cannot get streaks DOM because did not render in GitHub website.
+ * In that case, it comes to be success when it request over second times.
+ *
+ * @param {string} username - GitHub username
+ * @return {Promise&lt;{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error&gt;}
+ */
+export function fetchStreaks(username) {
+  return fetchGitHub(`https://github.com/${username}`)
+    .then(html =&gt; {
+      const $html = cheerio.load(html);
+      if (!isUser(username, $html)) {
+        throw new Error(&apos;USER_NOT_FOUND&apos;);
+      }
+      const $columns = $html(&apos;#contributions-calendar &gt; .contrib-column&apos;);
+      if ($columns.length === 0) {
+        throw new Error(&apos;CANNOT_FETCH_STREAKS&apos;);
+      }
+      const [total, longest, current] = $columns.map((i, elm) =&gt; {
+        return parseContribColumn(cheerio(elm));
+      }).toArray();
+      const currentDate = moment.utc(total.end, &apos;MMM D, YYYY&apos;).toDate();
+      return {
+        currentStreak: parseStreaks(current, currentDate),
+        longestStreak: parseStreaks(longest, currentDate)
+      };
+    });
+}
+
+
+/**
+ * Fetch HTML from GitHub
+ *
+ * @param {string} url - URL
+ * @return {Promise&lt;string, Error&gt;}
+ */
+function fetchGitHub(url) {
+  return fetch(url).then(res =&gt; {
+    if (res.status === STATUS_NOT_FOUND) {
+      throw new Error(&apos;USER_NOT_FOUND&apos;);
+    } else if (res.status !== STATUS_OK) {
+      throw new Error(&apos;CANNOT_FETCH_DATA&apos;);
+    }
+    return res.text();
+  });
+}
+
+
+/**
+ * Decide GitHub user page or not
+ *
+ * @param {string} username - GitHub username
+ * @param {Object} $html - cheerio object
+ * @return {boolean}
+ */
+function isUser(username, $html) {
+  const atomUrl = $html(&apos;head &gt; link[title=atom]&apos;).attr(&apos;href&apos;);
+  return atomUrl &amp;&amp; atomUrl === `/${username}.atom`;
+}
+
+
+/**
+ * Parse HTML of `contrib-column` to data
+ *
+ * @param {Object} $column - cheerio object
+ * @return {{number: number, start: (string|null), end: (string|null), last: (string|null)}}
+ */
+function parseContribColumn($column) {
+  const number = parseInt($column.find(&apos;.contrib-number&apos;).text().split(&apos; &apos;)[0], 10);
+  const $range = $column.find(&apos;.text-muted&apos;).last();
+  const last = $range.find(&apos;time&apos;).attr(&apos;datetime&apos;) || null;
+  let end = null;
+  let start = null;
+  if (!last) {
+    const rangeText = $range.text();
+    [start, end] = rangeText.split(&apos;\u2013&apos;).map(s =&gt; s.trim());
+  }
+  return {number, end, start, last};
+}
+
+
+/**
+ * Parse data to streak
+ *
+ * @param {{number: number, start: (string|null), end: (string|null), last: (string|null)}} data - ret of parseContribColumn
+ * @param {Date} currentDate - current date
+ * @return {{days: number, end: (string|null), start: (string|null), last: (string|null)}}
+ */
+function parseStreaks(data, currentDate) {
+  const result = {days: data.number, end: null, start: null};
+  if (data.number === 0) {
+    if (data.last) {
+      return Object.assign({}, result, {last: data.last});
+    }
+    return result;
+  }
+  const end = moment(data.end, &apos;MMM, D&apos;).year(currentDate.getFullYear());
+  if (end.diff(currentDate) &gt; 0) {
+    end.subtract(1, &apos;years&apos;);
+  }
+  const start = end.clone().subtract(result.days - 1, &apos;days&apos;);
+  return Object.assign({}, result, {
+    end: end.format(&apos;YYYY-MM-DD&apos;),
+    start: start.format(&apos;YYYY-MM-DD&apos;)
+  });
+}
+
+
+/**
+ * Parse HTML to list of contribution
+ *
+ * @param {Object} $calendar - cheerio object
+ * @return {Array&lt;{date: string, count: number}&gt;}
+ */
+function parseCalendar($calendar) {
+  const data = [];
+  $calendar.find(&apos;rect&apos;).each((i, elm) =&gt; {
+    const $rect = cheerio(elm);
+    const date = $rect.attr(&apos;data-date&apos;);
+    if (!date) {
+      return;
+    }
+    data.push({
+      date,
+      count: parseInt($rect.attr(&apos;data-count&apos;), 10)
+    });
+  });
+  return data;
+}
+
+
+/**
+ * Summarize list of contribution
+ *
+ * @param {Array&lt;{date: string, count: number}&gt;} contributions - List of contribution
+ * @return {{end: string, start: string, total: number, busiestDay: {date: string, count: number}}}
+ */
+function summarizeContributions(contributions) {
+  let busiestDay = null;
+  let total = 0;
+  contributions.forEach(d =&gt; {
+    if (d.count &gt; 0 &amp;&amp; (!busiestDay || d.count &gt; busiestDay.count)) {
+      busiestDay = d;
+    }
+    total += d.count;
+  });
+  return {
+    busiestDay,
+    end: contributions.slice(-1)[0].date,
+    start: contributions[0].date,
+    total
+  };
+}
+</code></pre>
+
+</div>
+
+<footer class="footer">
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.3)</span></a>
+</footer>
+
+<script src="script/search_index.js"></script>
+<script src="script/search.js"></script>
+<script src="script/pretty-print.js"></script>
+<script src="script/inherited-summary.js"></script>
+<script src="script/test-summary.js"></script>
+<script src="script/inner-link.js"></script>
+<script src="script/patch-for-local.js"></script>
+</body>
+</html>

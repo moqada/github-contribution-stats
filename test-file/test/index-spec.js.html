@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base data-ice="baseUrl" href="../../">
+  <title data-ice="title">test/index-spec.js | API Document</title>
+  <link type="text/css" rel="stylesheet" href="css/style.css">
+  <link type="text/css" rel="stylesheet" href="css/prettify-tomorrow.css">
+  <script src="script/prettify/prettify.js"></script>
+  
+  
+  <script src="script/manual.js"></script>
+</head>
+<body class="layout-container" data-ice="rootContainer">
+
+<header>
+  <a href="./">Home</a>
+  
+  <a href="identifiers.html">Reference</a>
+  <a href="source.html">Source</a>
+  <a href="test.html" data-ice="testLink">Test</a>
+  <a data-ice="repoURL" href="https://github.com/moqada/github-contribution-stats.git" class="repo-url-github">Repository</a>
+  <div class="search-box">
+  <span>
+    <img src="./image/search.png">
+    <span class="search-input-edge"></span><input class="search-input"><span class="search-input-edge"></span>
+  </span>
+    <ul class="search-result"></ul>
+  </div>
+</header>
+
+<nav class="navigation" data-ice="nav"><div>
+  <ul>
+    
+  <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchContributions">fetchContributions</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStats">fetchStats</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Stats">Stats</a></span></span></li>
+</ul>
+</div>
+</nav>
+
+<div class="content" data-ice="content"><h1 data-ice="title">test/index-spec.js</h1>
+<pre class="source-code line-number raw-source-code"><code class="prettyprint linenums" data-ice="content">/* eslint-disable no-magic-numbers, max-nested-callbacks */
+import fs from &apos;fs&apos;;
+import path from &apos;path&apos;;
+import assert from &apos;power-assert&apos;;
+import nock from &apos;nock&apos;;
+import {fetchStats, fetchContributions, fetchStreaks} from &apos;../src&apos;;
+
+const fixtureDir = path.resolve(&apos;./test/fixtures&apos;);
+
+describe(&apos;github-contribution-stats&apos;, () =&gt; {
+  let mockHtml = null;
+  let mockSvg = null;
+  let mockServer = null;
+  before(() =&gt; {
+    mockHtml = fs.readFileSync(path.join(fixtureDir, &apos;moqada.html&apos;)).toString();
+    mockSvg = fs.readFileSync(path.join(fixtureDir, &apos;moqada.svg&apos;)).toString();
+  });
+  beforeEach(() =&gt; {
+    mockServer = nock(&apos;https://github.com&apos;);
+  });
+  afterEach(() =&gt; {
+    nock.cleanAll();
+  });
+
+  /** @test {fetchStats} */
+  describe(&apos;fetchStats()&apos;, () =&gt; {
+    beforeEach(() =&gt; {
+      mockServer
+        .get(&apos;/users/moqada/contributions&apos;)
+        .reply(200, mockSvg)
+        .get(&apos;/moqada&apos;)
+        .reply(200, mockHtml);
+    });
+
+    it(&apos;should return valid stats&apos;, () =&gt; {
+      const fixtureFile = fs.readFileSync(path.join(fixtureDir, &apos;stats-valid-moqada.json&apos;));
+      const valid = JSON.parse(fixtureFile.toString());
+      return fetchStats(&apos;moqada&apos;).then(stat =&gt; assert.deepEqual(stat, valid));
+    });
+
+    it(&apos;should return valid stats with summary option&apos;, () =&gt; {
+      const fixtureFile = fs.readFileSync(path.join(fixtureDir, &apos;stats-valid-moqada.json&apos;));
+      const valid = JSON.parse(fixtureFile.toString());
+      delete valid.summary;
+      return fetchStats(&apos;moqada&apos;, {summary: false}).then(stat =&gt; assert.deepEqual(stat, valid));
+    });
+  });
+
+  /** @test {fetchContributions} */
+  describe(&apos;fetchContributions()&apos;, () =&gt; {
+    beforeEach(() =&gt; {
+      mockServer
+        .get(&apos;/users/moqada/contributions&apos;)
+        .reply(200, mockSvg);
+    });
+    it(&apos;should return valid contributions&apos;, () =&gt; {
+      const fixtureFile = fs.readFileSync(path.join(fixtureDir, &apos;contributions-valid-moqada.json&apos;));
+      const valid = JSON.parse(fixtureFile.toString());
+      return fetchContributions(&apos;moqada&apos;).then(stat =&gt; assert.deepEqual(stat, valid));
+    });
+  });
+
+  /** @test {fetchStreaks} */
+  describe(&apos;fetchStreaks()&apos;, () =&gt; {
+    beforeEach(() =&gt; {
+      mockServer
+        .get(&apos;/moqada&apos;)
+        .reply(200, mockHtml);
+    });
+    it(&apos;should return valid streaks&apos;, () =&gt; {
+      const fixtureFile = fs.readFileSync(path.join(fixtureDir, &apos;streaks-valid-moqada.json&apos;));
+      const valid = JSON.parse(fixtureFile.toString());
+      return fetchStreaks(&apos;moqada&apos;).then(stat =&gt; assert.deepEqual(stat, valid));
+    });
+  });
+});
+</code></pre>
+
+</div>
+
+<footer class="footer">
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.3)</span></a>
+</footer>
+
+<script src="script/search_index.js"></script>
+<script src="script/search.js"></script>
+<script src="script/pretty-print.js"></script>
+<script src="script/inherited-summary.js"></script>
+<script src="script/test-summary.js"></script>
+<script src="script/inner-link.js"></script>
+<script src="script/patch-for-local.js"></script>
+</body>
+</html>

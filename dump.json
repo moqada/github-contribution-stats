@@ -1,0 +1,1509 @@
+[
+  {
+    "__docId__": 0,
+    "kind": "file",
+    "static": true,
+    "variation": null,
+    "name": "src/index.js",
+    "memberof": null,
+    "longname": "src/index.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 1,
+    "content": "import fetch from 'isomorphic-fetch';\nimport moment from 'moment';\nimport cheerio from 'cheerio';\n\nconst STATUS_OK = 200;\nconst STATUS_NOT_FOUND = 404;\n\n/**\n * @typedef {Object} Stats\n * @property {Array<{date: string, count: number}>} contributions - List of contributions\n * @property {CurrentStreak} currentStreak - Current streak\n * @property {LongestStreak} longestStreak - Longest streak\n * @property {Object} [summary] - Summary of contributions\n * @property {string} summary.start - Start date of contributions\n * @property {string} summary.end - End date of contributions\n * @property {string} summary.total - Total contributions\n * @property {?{date: string, count: number}} [summary.busiestDay] - Busiest day of contributions\n * @propety {string} [calendar] - SVG of contributions calendar\n *\n * @example\n * {\n *   contributions: [\n *     {date: '2015-01-23', count: 0},\n *     ...\n *   ],\n *   calendar: '<svg>....</svg>'\n *   currentStreak: {days: 0, end: null, start: null, last: '2016-01-23T08:00:00Z' },\n *   longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16' },\n *   summary: {\n *     busiestDay: {date: '2015-11-02', count: 34},\n *     end: '2016-01-23',\n *     start: '2015-01-23',\n *     total: 1271\n *   }\n * }\n */\n/**\n * @typedef {Object} CurrentStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n * @property {?string} [last] - Last datetime of contribution when current streak is 0\n */\n/**\n * @typedef {Object} LongestStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n */\n\n\n/**\n * Fetch contributions and streaks of GitHub user\n *\n * @param {string} username GitHub username\n * @param {Object} [opts] Options\n * @param {boolean} [opts.summary=true] Flag of includes summary\n * @return {Promise<Stats, Error>}\n */\nexport function fetchStats(username, {summary = true} = {}) {\n  return fetchContributions(username).then(contributionData => {\n    return fetchStreaks(username).then(streakData => {\n      return Object.assign({}, contributionData, streakData);\n    });\n  }).then(result => {\n    const res = Object.assign({}, result);\n    if (summary) {\n      return Object.assign({}, res, {summary: summarizeContributions(res.contributions)});\n    }\n    return res;\n  });\n}\n\n\n/**\n * Fetch contributions of GitHub user\n *\n * @param {string} username - GitHub username\n * @return {Promise<{calendar: string, contributions: Array<{date: string, count: number}>}, Error>}\n */\nexport function fetchContributions(username) {\n  return fetchGitHub(`https://github.com/users/${username}/contributions`)\n    .then(html => {\n      return {\n        calendar: html,\n        contributions: parseCalendar(cheerio(html))\n      };\n    });\n}\n\n\n/**\n * Fetch streaks of GitHub user\n *\n * Sometimes, it cannot get streaks DOM because did not render in GitHub website.\n * In that case, it comes to be success when it request over second times.\n *\n * @param {string} username - GitHub username\n * @return {Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>}\n */\nexport function fetchStreaks(username) {\n  return fetchGitHub(`https://github.com/${username}`)\n    .then(html => {\n      const $html = cheerio.load(html);\n      if (!isUser(username, $html)) {\n        throw new Error('USER_NOT_FOUND');\n      }\n      const $columns = $html('#contributions-calendar > .contrib-column');\n      if ($columns.length === 0) {\n        throw new Error('CANNOT_FETCH_STREAKS');\n      }\n      const [total, longest, current] = $columns.map((i, elm) => {\n        return parseContribColumn(cheerio(elm));\n      }).toArray();\n      const currentDate = moment.utc(total.end, 'MMM D, YYYY').toDate();\n      return {\n        currentStreak: parseStreaks(current, currentDate),\n        longestStreak: parseStreaks(longest, currentDate)\n      };\n    });\n}\n\n\n/**\n * Fetch HTML from GitHub\n *\n * @param {string} url - URL\n * @return {Promise<string, Error>}\n */\nfunction fetchGitHub(url) {\n  return fetch(url).then(res => {\n    if (res.status === STATUS_NOT_FOUND) {\n      throw new Error('USER_NOT_FOUND');\n    } else if (res.status !== STATUS_OK) {\n      throw new Error('CANNOT_FETCH_DATA');\n    }\n    return res.text();\n  });\n}\n\n\n/**\n * Decide GitHub user page or not\n *\n * @param {string} username - GitHub username\n * @param {Object} $html - cheerio object\n * @return {boolean}\n */\nfunction isUser(username, $html) {\n  const atomUrl = $html('head > link[title=atom]').attr('href');\n  return atomUrl && atomUrl === `/${username}.atom`;\n}\n\n\n/**\n * Parse HTML of `contrib-column` to data\n *\n * @param {Object} $column - cheerio object\n * @return {{number: number, start: (string|null), end: (string|null), last: (string|null)}}\n */\nfunction parseContribColumn($column) {\n  const number = parseInt($column.find('.contrib-number').text().split(' ')[0], 10);\n  const $range = $column.find('.text-muted').last();\n  const last = $range.find('time').attr('datetime') || null;\n  let end = null;\n  let start = null;\n  if (!last) {\n    const rangeText = $range.text();\n    [start, end] = rangeText.split('\\u2013').map(s => s.trim());\n  }\n  return {number, end, start, last};\n}\n\n\n/**\n * Parse data to streak\n *\n * @param {{number: number, start: (string|null), end: (string|null), last: (string|null)}} data - ret of parseContribColumn\n * @param {Date} currentDate - current date\n * @return {{days: number, end: (string|null), start: (string|null), last: (string|null)}}\n */\nfunction parseStreaks(data, currentDate) {\n  const result = {days: data.number, end: null, start: null};\n  if (data.number === 0) {\n    if (data.last) {\n      return Object.assign({}, result, {last: data.last});\n    }\n    return result;\n  }\n  const end = moment(data.end, 'MMM, D').year(currentDate.getFullYear());\n  if (end.diff(currentDate) > 0) {\n    end.subtract(1, 'years');\n  }\n  const start = end.clone().subtract(result.days - 1, 'days');\n  return Object.assign({}, result, {\n    end: end.format('YYYY-MM-DD'),\n    start: start.format('YYYY-MM-DD')\n  });\n}\n\n\n/**\n * Parse HTML to list of contribution\n *\n * @param {Object} $calendar - cheerio object\n * @return {Array<{date: string, count: number}>}\n */\nfunction parseCalendar($calendar) {\n  const data = [];\n  $calendar.find('rect').each((i, elm) => {\n    const $rect = cheerio(elm);\n    const date = $rect.attr('data-date');\n    if (!date) {\n      return;\n    }\n    data.push({\n      date,\n      count: parseInt($rect.attr('data-count'), 10)\n    });\n  });\n  return data;\n}\n\n\n/**\n * Summarize list of contribution\n *\n * @param {Array<{date: string, count: number}>} contributions - List of contribution\n * @return {{end: string, start: string, total: number, busiestDay: {date: string, count: number}}}\n */\nfunction summarizeContributions(contributions) {\n  let busiestDay = null;\n  let total = 0;\n  contributions.forEach(d => {\n    if (d.count > 0 && (!busiestDay || d.count > busiestDay.count)) {\n      busiestDay = d;\n    }\n    total += d.count;\n  });\n  return {\n    busiestDay,\n    end: contributions.slice(-1)[0].date,\n    start: contributions[0].date,\n    total\n  };\n}\n"
+  },
+  {
+    "__docId__": 1,
+    "kind": "variable",
+    "static": true,
+    "variation": null,
+    "name": "STATUS_OK",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~STATUS_OK",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": null,
+    "lineNumber": 5,
+    "undocument": true,
+    "type": {
+      "types": [
+        "number"
+      ]
+    }
+  },
+  {
+    "__docId__": 2,
+    "kind": "variable",
+    "static": true,
+    "variation": null,
+    "name": "STATUS_NOT_FOUND",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~STATUS_NOT_FOUND",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": null,
+    "lineNumber": 6,
+    "undocument": true,
+    "type": {
+      "types": [
+        "number"
+      ]
+    }
+  },
+  {
+    "__docId__": 3,
+    "kind": "typedef",
+    "static": true,
+    "variation": null,
+    "name": "Stats",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~Stats",
+    "access": null,
+    "description": null,
+    "examples": [
+      "{\n  contributions: [\n    {date: '2015-01-23', count: 0},\n    ...\n  ],\n  calendar: '<svg>....</svg>'\n  currentStreak: {days: 0, end: null, start: null, last: '2016-01-23T08:00:00Z' },\n  longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16' },\n  summary: {\n    busiestDay: {date: '2015-11-02', count: 34},\n    end: '2016-01-23',\n    start: '2015-01-23',\n    total: 1271\n  }\n}"
+    ],
+    "unknown": [
+      {
+        "tagName": "@propety",
+        "tagValue": "{string} [calendar] - SVG of contributions calendar"
+      }
+    ],
+    "properties": [
+      {
+        "nullable": null,
+        "types": [
+          "Array<{date: string, count: number}>"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "contributions",
+        "description": "List of contributions"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "CurrentStreak"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "currentStreak",
+        "description": "Current streak"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "LongestStreak"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "longestStreak",
+        "description": "Longest streak"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "Object"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "summary",
+        "description": "Summary of contributions"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "summary.start",
+        "description": "Start date of contributions"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "summary.end",
+        "description": "End date of contributions"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "summary.total",
+        "description": "Total contributions"
+      },
+      {
+        "nullable": true,
+        "types": [
+          "{date: string, count: number}"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "summary.busiestDay",
+        "description": "Busiest day of contributions"
+      }
+    ],
+    "type": {
+      "types": [
+        "Object"
+      ],
+      "optional": false,
+      "name": "Stats"
+    }
+  },
+  {
+    "__docId__": 4,
+    "kind": "typedef",
+    "static": true,
+    "variation": null,
+    "name": "CurrentStreak",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~CurrentStreak",
+    "access": null,
+    "description": null,
+    "properties": [
+      {
+        "nullable": null,
+        "types": [
+          "number"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "days",
+        "description": "Days"
+      },
+      {
+        "nullable": true,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "end",
+        "description": "End date"
+      },
+      {
+        "nullable": true,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "start",
+        "description": "Start date"
+      },
+      {
+        "nullable": true,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "last",
+        "description": "Last datetime of contribution when current streak is 0"
+      }
+    ],
+    "type": {
+      "types": [
+        "Object"
+      ],
+      "optional": false,
+      "name": "CurrentStreak"
+    }
+  },
+  {
+    "__docId__": 5,
+    "kind": "typedef",
+    "static": true,
+    "variation": null,
+    "name": "LongestStreak",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~LongestStreak",
+    "access": null,
+    "description": null,
+    "properties": [
+      {
+        "nullable": null,
+        "types": [
+          "number"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "days",
+        "description": "Days"
+      },
+      {
+        "nullable": true,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "end",
+        "description": "End date"
+      },
+      {
+        "nullable": true,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "start",
+        "description": "Start date"
+      }
+    ],
+    "type": {
+      "types": [
+        "Object"
+      ],
+      "optional": false,
+      "name": "LongestStreak"
+    }
+  },
+  {
+    "__docId__": 6,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "fetchStats",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~fetchStats",
+    "access": null,
+    "export": true,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": "{fetchStats}",
+    "description": "Fetch contributions and streaks of GitHub user",
+    "lineNumber": 60,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "username",
+        "description": "GitHub username"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "Object"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "opts",
+        "description": "Options"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "boolean"
+        ],
+        "spread": false,
+        "optional": true,
+        "defaultValue": "true",
+        "defaultRaw": true,
+        "name": "opts.summary",
+        "description": "Flag of includes summary"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise<Stats, Error>"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 7,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "fetchContributions",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~fetchContributions",
+    "access": null,
+    "export": true,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": "{fetchContributions}",
+    "description": "Fetch contributions of GitHub user",
+    "lineNumber": 81,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "username",
+        "description": "GitHub username"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise<{calendar: string, contributions: Array<{date: string, count: number}>}, Error>"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 8,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "fetchStreaks",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~fetchStreaks",
+    "access": null,
+    "export": true,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": "{fetchStreaks}",
+    "description": "Fetch streaks of GitHub user\n\nSometimes, it cannot get streaks DOM because did not render in GitHub website.\nIn that case, it comes to be success when it request over second times.",
+    "lineNumber": 101,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "username",
+        "description": "GitHub username"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 9,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "fetchGitHub",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~fetchGitHub",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": "Fetch HTML from GitHub",
+    "lineNumber": 130,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "url",
+        "description": "URL"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise<string, Error>"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 10,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "isUser",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~isUser",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": "Decide GitHub user page or not",
+    "lineNumber": 149,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "username",
+        "description": "GitHub username"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "Object"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "$html",
+        "description": "cheerio object"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "boolean"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 11,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "parseContribColumn",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~parseContribColumn",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": "Parse HTML of `contrib-column` to data",
+    "lineNumber": 161,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "Object"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "$column",
+        "description": "cheerio object"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "{number: number, start: (string|null), end: (string|null), last: (string|null)}"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 12,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "parseStreaks",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~parseStreaks",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": "Parse data to streak",
+    "lineNumber": 182,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "{number: number, start: (string|null), end: (string|null), last: (string|null)}"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "data",
+        "description": "ret of parseContribColumn"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "Date"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "currentDate",
+        "description": "current date"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "{days: number, end: (string|null), start: (string|null), last: (string|null)}"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 13,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "parseCalendar",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~parseCalendar",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": "Parse HTML to list of contribution",
+    "lineNumber": 208,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "Object"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "$calendar",
+        "description": "cheerio object"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Array<{date: string, count: number}>"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 14,
+    "kind": "function",
+    "static": true,
+    "variation": null,
+    "name": "summarizeContributions",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~summarizeContributions",
+    "access": null,
+    "export": false,
+    "importPath": "github-contribution-stats/src/index.js",
+    "importStyle": null,
+    "description": "Summarize list of contribution",
+    "lineNumber": 231,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "Array<{date: string, count: number}>"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "contributions",
+        "description": "List of contribution"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "{end: string, start: string, total: number, busiestDay: {date: string, count: number}}"
+      ],
+      "spread": false,
+      "description": ""
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 16,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Infinity",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Infinity",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Infinity",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 17,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "NaN",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/NaN",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~NaN",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 18,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "undefined",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/undefined",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~undefined",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 19,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "null",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/null",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~null",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 20,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Object",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 21,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~object",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 22,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Function",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 23,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~function",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 24,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Boolean",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 25,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~boolean",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 26,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Symbol",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Symbol",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 27,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Error",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Error",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 28,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "EvalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~EvalError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 29,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "InternalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~InternalError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 30,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "RangeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RangeError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 31,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "ReferenceError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ReferenceError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 32,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "SyntaxError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~SyntaxError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 33,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "TypeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~TypeError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 34,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "URIError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~URIError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 35,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Number",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 36,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~number",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 37,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Date",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Date",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 38,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "String",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~String",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 39,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "string",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~string",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 40,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "RegExp",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RegExp",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 41,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 42,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Int8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int8Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 43,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 44,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint8ClampedArray",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8ClampedArray",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8ClampedArray",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 45,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Int16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int16Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 46,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint16Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 47,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Int32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int32Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 48,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint32Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 49,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Float32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float32Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 50,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Float64Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float64Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float64Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 51,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Map",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Map",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 52,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Set",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Set",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 53,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "WeakMap",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakMap",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 54,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "WeakSet",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakSet",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 55,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "ArrayBuffer",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ArrayBuffer",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 56,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "DataView",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~DataView",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 57,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "JSON",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~JSON",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 58,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Promise",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Promise",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 59,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Generator",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Generator",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 60,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "GeneratorFunction",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~GeneratorFunction",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 61,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Reflect",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Reflect",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 62,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Proxy",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Proxy",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 64,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "CanvasRenderingContext2D",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~CanvasRenderingContext2D",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 65,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "DocumentFragment",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/DocumentFragment",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~DocumentFragment",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 66,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Element",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Element",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~Element",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 67,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Event",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Event",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~Event",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 68,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Node",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Node",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~Node",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 69,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "NodeList",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/NodeList",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~NodeList",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 70,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "XMLHttpRequest",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/XMLHttpRequest",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~XMLHttpRequest",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 71,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "AudioContext",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/AudioContext",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~AudioContext",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 72,
+    "kind": "testFile",
+    "static": true,
+    "variation": null,
+    "name": "test/index-spec.js",
+    "memberof": null,
+    "longname": "test/index-spec.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 2,
+    "content": "/* eslint-disable no-magic-numbers, max-nested-callbacks */\nimport fs from 'fs';\nimport path from 'path';\nimport assert from 'power-assert';\nimport nock from 'nock';\nimport {fetchStats, fetchContributions, fetchStreaks} from '../src';\n\nconst fixtureDir = path.resolve('./test/fixtures');\n\ndescribe('github-contribution-stats', () => {\n  let mockHtml = null;\n  let mockSvg = null;\n  let mockServer = null;\n  before(() => {\n    mockHtml = fs.readFileSync(path.join(fixtureDir, 'moqada.html')).toString();\n    mockSvg = fs.readFileSync(path.join(fixtureDir, 'moqada.svg')).toString();\n  });\n  beforeEach(() => {\n    mockServer = nock('https://github.com');\n  });\n  afterEach(() => {\n    nock.cleanAll();\n  });\n\n  /** @test {fetchStats} */\n  describe('fetchStats()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/users/moqada/contributions')\n        .reply(200, mockSvg)\n        .get('/moqada')\n        .reply(200, mockHtml);\n    });\n\n    it('should return valid stats', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'stats-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchStats('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n\n    it('should return valid stats with summary option', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'stats-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      delete valid.summary;\n      return fetchStats('moqada', {summary: false}).then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n\n  /** @test {fetchContributions} */\n  describe('fetchContributions()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/users/moqada/contributions')\n        .reply(200, mockSvg);\n    });\n    it('should return valid contributions', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'contributions-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchContributions('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n\n  /** @test {fetchStreaks} */\n  describe('fetchStreaks()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/moqada')\n        .reply(200, mockHtml);\n    });\n    it('should return valid streaks', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'streaks-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchStreaks('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n});\n"
+  },
+  {
+    "__docId__": 73,
+    "kind": "testDescribe",
+    "static": true,
+    "variation": null,
+    "name": "describe0",
+    "testId": 0,
+    "memberof": "test/index-spec.js",
+    "testDepth": 0,
+    "longname": "test/index-spec.js~describe0",
+    "access": null,
+    "description": "github-contribution-stats",
+    "lineNumber": 10
+  },
+  {
+    "__docId__": 74,
+    "kind": "testDescribe",
+    "static": true,
+    "variation": null,
+    "name": "describe1",
+    "testId": 1,
+    "memberof": "test/index-spec.js~describe0",
+    "testDepth": 1,
+    "longname": "test/index-spec.js~describe0.describe1",
+    "access": null,
+    "description": "fetchStats()",
+    "lineNumber": 26,
+    "unknown": [
+      {
+        "tagName": "@test",
+        "tagValue": "{fetchStats}"
+      }
+    ],
+    "testTargets": [
+      "fetchStats"
+    ]
+  },
+  {
+    "__docId__": 75,
+    "kind": "testIt",
+    "static": true,
+    "variation": null,
+    "name": "it2",
+    "testId": 2,
+    "memberof": "test/index-spec.js~describe0.describe1",
+    "testDepth": 2,
+    "longname": "test/index-spec.js~describe0.describe1.it2",
+    "access": null,
+    "description": "should return valid stats",
+    "lineNumber": 35
+  },
+  {
+    "__docId__": 76,
+    "kind": "testIt",
+    "static": true,
+    "variation": null,
+    "name": "it3",
+    "testId": 3,
+    "memberof": "test/index-spec.js~describe0.describe1",
+    "testDepth": 2,
+    "longname": "test/index-spec.js~describe0.describe1.it3",
+    "access": null,
+    "description": "should return valid stats with summary option",
+    "lineNumber": 41
+  },
+  {
+    "__docId__": 77,
+    "kind": "testDescribe",
+    "static": true,
+    "variation": null,
+    "name": "describe4",
+    "testId": 4,
+    "memberof": "test/index-spec.js~describe0",
+    "testDepth": 1,
+    "longname": "test/index-spec.js~describe0.describe4",
+    "access": null,
+    "description": "fetchContributions()",
+    "lineNumber": 50,
+    "unknown": [
+      {
+        "tagName": "@test",
+        "tagValue": "{fetchContributions}"
+      }
+    ],
+    "testTargets": [
+      "fetchContributions"
+    ]
+  },
+  {
+    "__docId__": 78,
+    "kind": "testIt",
+    "static": true,
+    "variation": null,
+    "name": "it5",
+    "testId": 5,
+    "memberof": "test/index-spec.js~describe0.describe4",
+    "testDepth": 2,
+    "longname": "test/index-spec.js~describe0.describe4.it5",
+    "access": null,
+    "description": "should return valid contributions",
+    "lineNumber": 56
+  },
+  {
+    "__docId__": 79,
+    "kind": "testDescribe",
+    "static": true,
+    "variation": null,
+    "name": "describe6",
+    "testId": 6,
+    "memberof": "test/index-spec.js~describe0",
+    "testDepth": 1,
+    "longname": "test/index-spec.js~describe0.describe6",
+    "access": null,
+    "description": "fetchStreaks()",
+    "lineNumber": 64,
+    "unknown": [
+      {
+        "tagName": "@test",
+        "tagValue": "{fetchStreaks}"
+      }
+    ],
+    "testTargets": [
+      "fetchStreaks"
+    ]
+  },
+  {
+    "__docId__": 80,
+    "kind": "testIt",
+    "static": true,
+    "variation": null,
+    "name": "it7",
+    "testId": 7,
+    "memberof": "test/index-spec.js~describe0.describe6",
+    "testDepth": 2,
+    "longname": "test/index-spec.js~describe0.describe6.it7",
+    "access": null,
+    "description": "should return valid streaks",
+    "lineNumber": 70
+  }
+]
