@@ -87,7 +87,7 @@ fetchStreaks('moqada').then(streaks => console.log(streaks));
 ```
 
 
-### Streaks
+### Contributions
 
 Get users's Contributions from GitHub.
 
