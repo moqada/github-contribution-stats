@@ -104,7 +104,9 @@ const STATUS_NOT_FOUND = 404;
  */
 export function fetchStats(username, {summary = true} = {}) {
   return fetchContributions(username).then(contributionData =&gt; {
-    return fetchStreaks(username).then(streakData =&gt; {
+    const {contributions} = contributionData;
+    const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
+    return fetchStreaks(username, {currentDate}).then(streakData =&gt; {
       return Object.assign({}, contributionData, streakData);
     });
   }).then(result =&gt; {
@@ -141,9 +143,11 @@ export function fetchContributions(username) {
  * In that case, it comes to be success when it request over second times.
  *
  * @param {string} username - GitHub username
+ * @param {Date} [currentDate] - Current date ex. YYYY-MM-DD
  * @return {Promise&lt;{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error&gt;}
  */
-export function fetchStreaks(username) {
+export function fetchStreaks(username, opts = {}) {
+  let {currentDate} = opts;
   return fetchGitHub(`https://github.com/${username}`)
     .then(html =&gt; {
       const $html = cheerio.load(html);
@@ -154,10 +158,13 @@ export function fetchStreaks(username) {
       if ($columns.length === 0) {
         throw new Error(&apos;CANNOT_FETCH_STREAKS&apos;);
       }
-      const [total, longest, current] = $columns.map((i, elm) =&gt; {
-        return parseContribColumn(cheerio(elm));
-      }).toArray();
-      const currentDate = moment.utc(total.end, &apos;MMM D, YYYY&apos;).toDate();
+      const longest = parseContribColumn($columns.eq(1));
+      const current = parseContribColumn($columns.eq(2));
+      if (!currentDate) {
+        // XXX: Sometimes, Total columns and contributions are not equal end date.
+        const contributions = parseCalendar($html(&apos;#contributions-calendar svg&apos;));
+        currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
+      }
       return {
         currentStreak: parseStreaks(current, currentDate),
         longestStreak: parseStreaks(longest, currentDate)

@@ -10,7 +10,7 @@
     "access": null,
     "description": null,
     "lineNumber": 1,
-    "content": "import fetch from 'isomorphic-fetch';\nimport moment from 'moment';\nimport cheerio from 'cheerio';\n\nconst STATUS_OK = 200;\nconst STATUS_NOT_FOUND = 404;\n\n/**\n * @typedef {Object} Stats\n * @property {Array<{date: string, count: number}>} contributions - List of contributions\n * @property {CurrentStreak} currentStreak - Current streak\n * @property {LongestStreak} longestStreak - Longest streak\n * @property {Object} [summary] - Summary of contributions\n * @property {string} summary.start - Start date of contributions\n * @property {string} summary.end - End date of contributions\n * @property {string} summary.total - Total contributions\n * @property {?{date: string, count: number}} [summary.busiestDay] - Busiest day of contributions\n * @propety {string} [calendar] - SVG of contributions calendar\n *\n * @example\n * {\n *   contributions: [\n *     {date: '2015-01-23', count: 0},\n *     ...\n *   ],\n *   calendar: '<svg>....</svg>'\n *   currentStreak: {days: 0, end: null, start: null, last: '2016-01-23T08:00:00Z' },\n *   longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16' },\n *   summary: {\n *     busiestDay: {date: '2015-11-02', count: 34},\n *     end: '2016-01-23',\n *     start: '2015-01-23',\n *     total: 1271\n *   }\n * }\n */\n/**\n * @typedef {Object} CurrentStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n * @property {?string} [last] - Last datetime of contribution when current streak is 0\n */\n/**\n * @typedef {Object} LongestStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n */\n\n\n/**\n * Fetch contributions and streaks of GitHub user\n *\n * @param {string} username GitHub username\n * @param {Object} [opts] Options\n * @param {boolean} [opts.summary=true] Flag of includes summary\n * @return {Promise<Stats, Error>}\n */\nexport function fetchStats(username, {summary = true} = {}) {\n  return fetchContributions(username).then(contributionData => {\n    return fetchStreaks(username).then(streakData => {\n      return Object.assign({}, contributionData, streakData);\n    });\n  }).then(result => {\n    const res = Object.assign({}, result);\n    if (summary) {\n      return Object.assign({}, res, {summary: summarizeContributions(res.contributions)});\n    }\n    return res;\n  });\n}\n\n\n/**\n * Fetch contributions of GitHub user\n *\n * @param {string} username - GitHub username\n * @return {Promise<{calendar: string, contributions: Array<{date: string, count: number}>}, Error>}\n */\nexport function fetchContributions(username) {\n  return fetchGitHub(`https://github.com/users/${username}/contributions`)\n    .then(html => {\n      return {\n        calendar: html,\n        contributions: parseCalendar(cheerio(html))\n      };\n    });\n}\n\n\n/**\n * Fetch streaks of GitHub user\n *\n * Sometimes, it cannot get streaks DOM because did not render in GitHub website.\n * In that case, it comes to be success when it request over second times.\n *\n * @param {string} username - GitHub username\n * @return {Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>}\n */\nexport function fetchStreaks(username) {\n  return fetchGitHub(`https://github.com/${username}`)\n    .then(html => {\n      const $html = cheerio.load(html);\n      if (!isUser(username, $html)) {\n        throw new Error('USER_NOT_FOUND');\n      }\n      const $columns = $html('#contributions-calendar > .contrib-column');\n      if ($columns.length === 0) {\n        throw new Error('CANNOT_FETCH_STREAKS');\n      }\n      const [total, longest, current] = $columns.map((i, elm) => {\n        return parseContribColumn(cheerio(elm));\n      }).toArray();\n      const currentDate = moment.utc(total.end, 'MMM D, YYYY').toDate();\n      return {\n        currentStreak: parseStreaks(current, currentDate),\n        longestStreak: parseStreaks(longest, currentDate)\n      };\n    });\n}\n\n\n/**\n * Fetch HTML from GitHub\n *\n * @param {string} url - URL\n * @return {Promise<string, Error>}\n */\nfunction fetchGitHub(url) {\n  return fetch(url).then(res => {\n    if (res.status === STATUS_NOT_FOUND) {\n      throw new Error('USER_NOT_FOUND');\n    } else if (res.status !== STATUS_OK) {\n      throw new Error('CANNOT_FETCH_DATA');\n    }\n    return res.text();\n  });\n}\n\n\n/**\n * Decide GitHub user page or not\n *\n * @param {string} username - GitHub username\n * @param {Object} $html - cheerio object\n * @return {boolean}\n */\nfunction isUser(username, $html) {\n  const atomUrl = $html('head > link[title=atom]').attr('href');\n  return atomUrl && atomUrl === `/${username}.atom`;\n}\n\n\n/**\n * Parse HTML of `contrib-column` to data\n *\n * @param {Object} $column - cheerio object\n * @return {{number: number, start: (string|null), end: (string|null), last: (string|null)}}\n */\nfunction parseContribColumn($column) {\n  const number = parseInt($column.find('.contrib-number').text().split(' ')[0], 10);\n  const $range = $column.find('.text-muted').last();\n  const last = $range.find('time').attr('datetime') || null;\n  let end = null;\n  let start = null;\n  if (!last) {\n    const rangeText = $range.text();\n    [start, end] = rangeText.split('\\u2013').map(s => s.trim());\n  }\n  return {number, end, start, last};\n}\n\n\n/**\n * Parse data to streak\n *\n * @param {{number: number, start: (string|null), end: (string|null), last: (string|null)}} data - ret of parseContribColumn\n * @param {Date} currentDate - current date\n * @return {{days: number, end: (string|null), start: (string|null), last: (string|null)}}\n */\nfunction parseStreaks(data, currentDate) {\n  const result = {days: data.number, end: null, start: null};\n  if (data.number === 0) {\n    if (data.last) {\n      return Object.assign({}, result, {last: data.last});\n    }\n    return result;\n  }\n  const end = moment(data.end, 'MMM, D').year(currentDate.getFullYear());\n  if (end.diff(currentDate) > 0) {\n    end.subtract(1, 'years');\n  }\n  const start = end.clone().subtract(result.days - 1, 'days');\n  return Object.assign({}, result, {\n    end: end.format('YYYY-MM-DD'),\n    start: start.format('YYYY-MM-DD')\n  });\n}\n\n\n/**\n * Parse HTML to list of contribution\n *\n * @param {Object} $calendar - cheerio object\n * @return {Array<{date: string, count: number}>}\n */\nfunction parseCalendar($calendar) {\n  const data = [];\n  $calendar.find('rect').each((i, elm) => {\n    const $rect = cheerio(elm);\n    const date = $rect.attr('data-date');\n    if (!date) {\n      return;\n    }\n    data.push({\n      date,\n      count: parseInt($rect.attr('data-count'), 10)\n    });\n  });\n  return data;\n}\n\n\n/**\n * Summarize list of contribution\n *\n * @param {Array<{date: string, count: number}>} contributions - List of contribution\n * @return {{end: string, start: string, total: number, busiestDay: {date: string, count: number}}}\n */\nfunction summarizeContributions(contributions) {\n  let busiestDay = null;\n  let total = 0;\n  contributions.forEach(d => {\n    if (d.count > 0 && (!busiestDay || d.count > busiestDay.count)) {\n      busiestDay = d;\n    }\n    total += d.count;\n  });\n  return {\n    busiestDay,\n    end: contributions.slice(-1)[0].date,\n    start: contributions[0].date,\n    total\n  };\n}\n"
+    "content": "import fetch from 'isomorphic-fetch';\nimport moment from 'moment';\nimport cheerio from 'cheerio';\n\nconst STATUS_OK = 200;\nconst STATUS_NOT_FOUND = 404;\n\n/**\n * @typedef {Object} Stats\n * @property {Array<{date: string, count: number}>} contributions - List of contributions\n * @property {CurrentStreak} currentStreak - Current streak\n * @property {LongestStreak} longestStreak - Longest streak\n * @property {Object} [summary] - Summary of contributions\n * @property {string} summary.start - Start date of contributions\n * @property {string} summary.end - End date of contributions\n * @property {string} summary.total - Total contributions\n * @property {?{date: string, count: number}} [summary.busiestDay] - Busiest day of contributions\n * @propety {string} [calendar] - SVG of contributions calendar\n *\n * @example\n * {\n *   contributions: [\n *     {date: '2015-01-23', count: 0},\n *     ...\n *   ],\n *   calendar: '<svg>....</svg>'\n *   currentStreak: {days: 0, end: null, start: null, last: '2016-01-23T08:00:00Z' },\n *   longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16' },\n *   summary: {\n *     busiestDay: {date: '2015-11-02', count: 34},\n *     end: '2016-01-23',\n *     start: '2015-01-23',\n *     total: 1271\n *   }\n * }\n */\n/**\n * @typedef {Object} CurrentStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n * @property {?string} [last] - Last datetime of contribution when current streak is 0\n */\n/**\n * @typedef {Object} LongestStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n */\n\n\n/**\n * Fetch contributions and streaks of GitHub user\n *\n * @param {string} username GitHub username\n * @param {Object} [opts] Options\n * @param {boolean} [opts.summary=true] Flag of includes summary\n * @return {Promise<Stats, Error>}\n */\nexport function fetchStats(username, {summary = true} = {}) {\n  return fetchContributions(username).then(contributionData => {\n    const {contributions} = contributionData;\n    const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();\n    return fetchStreaks(username, {currentDate}).then(streakData => {\n      return Object.assign({}, contributionData, streakData);\n    });\n  }).then(result => {\n    const res = Object.assign({}, result);\n    if (summary) {\n      return Object.assign({}, res, {summary: summarizeContributions(res.contributions)});\n    }\n    return res;\n  });\n}\n\n\n/**\n * Fetch contributions of GitHub user\n *\n * @param {string} username - GitHub username\n * @return {Promise<{calendar: string, contributions: Array<{date: string, count: number}>}, Error>}\n */\nexport function fetchContributions(username) {\n  return fetchGitHub(`https://github.com/users/${username}/contributions`)\n    .then(html => {\n      return {\n        calendar: html,\n        contributions: parseCalendar(cheerio(html))\n      };\n    });\n}\n\n\n/**\n * Fetch streaks of GitHub user\n *\n * Sometimes, it cannot get streaks DOM because did not render in GitHub website.\n * In that case, it comes to be success when it request over second times.\n *\n * @param {string} username - GitHub username\n * @param {Date} [currentDate] - Current date ex. YYYY-MM-DD\n * @return {Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>}\n */\nexport function fetchStreaks(username, opts = {}) {\n  let {currentDate} = opts;\n  return fetchGitHub(`https://github.com/${username}`)\n    .then(html => {\n      const $html = cheerio.load(html);\n      if (!isUser(username, $html)) {\n        throw new Error('USER_NOT_FOUND');\n      }\n      const $columns = $html('#contributions-calendar > .contrib-column');\n      if ($columns.length === 0) {\n        throw new Error('CANNOT_FETCH_STREAKS');\n      }\n      const longest = parseContribColumn($columns.eq(1));\n      const current = parseContribColumn($columns.eq(2));\n      if (!currentDate) {\n        // XXX: Sometimes, Total columns and contributions are not equal end date.\n        const contributions = parseCalendar($html('#contributions-calendar svg'));\n        currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();\n      }\n      return {\n        currentStreak: parseStreaks(current, currentDate),\n        longestStreak: parseStreaks(longest, currentDate)\n      };\n    });\n}\n\n\n/**\n * Fetch HTML from GitHub\n *\n * @param {string} url - URL\n * @return {Promise<string, Error>}\n */\nfunction fetchGitHub(url) {\n  return fetch(url).then(res => {\n    if (res.status === STATUS_NOT_FOUND) {\n      throw new Error('USER_NOT_FOUND');\n    } else if (res.status !== STATUS_OK) {\n      throw new Error('CANNOT_FETCH_DATA');\n    }\n    return res.text();\n  });\n}\n\n\n/**\n * Decide GitHub user page or not\n *\n * @param {string} username - GitHub username\n * @param {Object} $html - cheerio object\n * @return {boolean}\n */\nfunction isUser(username, $html) {\n  const atomUrl = $html('head > link[title=atom]').attr('href');\n  return atomUrl && atomUrl === `/${username}.atom`;\n}\n\n\n/**\n * Parse HTML of `contrib-column` to data\n *\n * @param {Object} $column - cheerio object\n * @return {{number: number, start: (string|null), end: (string|null), last: (string|null)}}\n */\nfunction parseContribColumn($column) {\n  const number = parseInt($column.find('.contrib-number').text().split(' ')[0], 10);\n  const $range = $column.find('.text-muted').last();\n  const last = $range.find('time').attr('datetime') || null;\n  let end = null;\n  let start = null;\n  if (!last) {\n    const rangeText = $range.text();\n    [start, end] = rangeText.split('\\u2013').map(s => s.trim());\n  }\n  return {number, end, start, last};\n}\n\n\n/**\n * Parse data to streak\n *\n * @param {{number: number, start: (string|null), end: (string|null), last: (string|null)}} data - ret of parseContribColumn\n * @param {Date} currentDate - current date\n * @return {{days: number, end: (string|null), start: (string|null), last: (string|null)}}\n */\nfunction parseStreaks(data, currentDate) {\n  const result = {days: data.number, end: null, start: null};\n  if (data.number === 0) {\n    if (data.last) {\n      return Object.assign({}, result, {last: data.last});\n    }\n    return result;\n  }\n  const end = moment(data.end, 'MMM, D').year(currentDate.getFullYear());\n  if (end.diff(currentDate) > 0) {\n    end.subtract(1, 'years');\n  }\n  const start = end.clone().subtract(result.days - 1, 'days');\n  return Object.assign({}, result, {\n    end: end.format('YYYY-MM-DD'),\n    start: start.format('YYYY-MM-DD')\n  });\n}\n\n\n/**\n * Parse HTML to list of contribution\n *\n * @param {Object} $calendar - cheerio object\n * @return {Array<{date: string, count: number}>}\n */\nfunction parseCalendar($calendar) {\n  const data = [];\n  $calendar.find('rect').each((i, elm) => {\n    const $rect = cheerio(elm);\n    const date = $rect.attr('data-date');\n    if (!date) {\n      return;\n    }\n    data.push({\n      date,\n      count: parseInt($rect.attr('data-count'), 10)\n    });\n  });\n  return data;\n}\n\n\n/**\n * Summarize list of contribution\n *\n * @param {Array<{date: string, count: number}>} contributions - List of contribution\n * @return {{end: string, start: string, total: number, busiestDay: {date: string, count: number}}}\n */\nfunction summarizeContributions(contributions) {\n  let busiestDay = null;\n  let total = 0;\n  contributions.forEach(d => {\n    if (d.count > 0 && (!busiestDay || d.count > busiestDay.count)) {\n      busiestDay = d;\n    }\n    total += d.count;\n  });\n  return {\n    busiestDay,\n    end: contributions.slice(-1)[0].date,\n    start: contributions[0].date,\n    total\n  };\n}\n"
   },
   {
     "__docId__": 1,
@@ -344,7 +344,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": "{fetchContributions}",
     "description": "Fetch contributions of GitHub user",
-    "lineNumber": 81,
+    "lineNumber": 83,
     "params": [
       {
         "nullable": null,
@@ -380,7 +380,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": "{fetchStreaks}",
     "description": "Fetch streaks of GitHub user\n\nSometimes, it cannot get streaks DOM because did not render in GitHub website.\nIn that case, it comes to be success when it request over second times.",
-    "lineNumber": 101,
+    "lineNumber": 104,
     "params": [
       {
         "nullable": null,
@@ -391,6 +391,16 @@
         "optional": false,
         "name": "username",
         "description": "GitHub username"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "Date"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "currentDate",
+        "description": "Current date ex. YYYY-MM-DD"
       }
     ],
     "return": {
@@ -416,7 +426,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Fetch HTML from GitHub",
-    "lineNumber": 130,
+    "lineNumber": 137,
     "params": [
       {
         "nullable": null,
@@ -452,7 +462,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Decide GitHub user page or not",
-    "lineNumber": 149,
+    "lineNumber": 156,
     "params": [
       {
         "nullable": null,
@@ -498,7 +508,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Parse HTML of `contrib-column` to data",
-    "lineNumber": 161,
+    "lineNumber": 168,
     "params": [
       {
         "nullable": null,
@@ -534,7 +544,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Parse data to streak",
-    "lineNumber": 182,
+    "lineNumber": 189,
     "params": [
       {
         "nullable": null,
@@ -580,7 +590,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Parse HTML to list of contribution",
-    "lineNumber": 208,
+    "lineNumber": 215,
     "params": [
       {
         "nullable": null,
@@ -616,7 +626,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Summarize list of contribution",
-    "lineNumber": 231,
+    "lineNumber": 238,
     "params": [
       {
         "nullable": null,
