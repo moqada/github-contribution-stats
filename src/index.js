@@ -98,7 +98,8 @@ export function fetchContributions(username) {
  * In that case, it comes to be success when it request over second times.
  *
  * @param {string} username - GitHub username
- * @param {Date} [currentDate] - Current date ex. YYYY-MM-DD
+ * @param {Object} [opts] - Options
+ * @param {Date} [opts.currentDate] - Current date ex. YYYY-MM-DD
  * @return {Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>}
  */
 export function fetchStreaks(username, opts = {}) {
