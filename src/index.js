@@ -109,10 +109,11 @@ export function fetchStreaks(username) {
       if ($columns.length === 0) {
         throw new Error('CANNOT_FETCH_STREAKS');
       }
-      const [total, longest, current] = $columns.map((i, elm) => {
-        return parseContribColumn(cheerio(elm));
-      }).toArray();
-      const currentDate = moment.utc(total.end, 'MMM D, YYYY').toDate();
+      const longest = parseContribColumn($columns.eq(1));
+      const current = parseContribColumn($columns.eq(2));
+      // XXX: Sometimes, Total columns and contributions are not equal end date.
+      const contributions = parseCalendar($html('#contributions-calendar svg'));
+      const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
       return {
         currentStreak: parseStreaks(current, currentDate),
         longestStreak: parseStreaks(longest, currentDate)
