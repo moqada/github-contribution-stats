@@ -59,7 +59,9 @@ const STATUS_NOT_FOUND = 404;
  */
 export function fetchStats(username, {summary = true} = {}) {
   return fetchContributions(username).then(contributionData => {
-    return fetchStreaks(username).then(streakData => {
+    const {contributions} = contributionData;
+    const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
+    return fetchStreaks(username, {currentDate}).then(streakData => {
       return Object.assign({}, contributionData, streakData);
     });
   }).then(result => {
@@ -96,9 +98,11 @@ export function fetchContributions(username) {
  * In that case, it comes to be success when it request over second times.
  *
  * @param {string} username - GitHub username
+ * @param {Date} [currentDate] - Current date ex. YYYY-MM-DD
  * @return {Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>}
  */
-export function fetchStreaks(username) {
+export function fetchStreaks(username, opts = {}) {
+  let {currentDate} = opts;
   return fetchGitHub(`https://github.com/${username}`)
     .then(html => {
       const $html = cheerio.load(html);
@@ -111,9 +115,11 @@ export function fetchStreaks(username) {
       }
       const longest = parseContribColumn($columns.eq(1));
       const current = parseContribColumn($columns.eq(2));
-      // XXX: Sometimes, Total columns and contributions are not equal end date.
-      const contributions = parseCalendar($html('#contributions-calendar svg'));
-      const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
+      if (!currentDate) {
+        // XXX: Sometimes, Total columns and contributions are not equal end date.
+        const contributions = parseCalendar($html('#contributions-calendar svg'));
+        currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
+      }
       return {
         currentStreak: parseStreaks(current, currentDate),
         longestStreak: parseStreaks(longest, currentDate)
