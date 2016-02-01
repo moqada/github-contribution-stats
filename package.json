@@ -7,7 +7,7 @@
     "url": "https://github.com/moqada/github-contribution-stats/issues"
   },
   "dependencies": {
-    "cheerio": "^0.19.0",
+    "cheerio": "^0.20.0",
     "isomorphic-fetch": "^2.2.1",
     "moment": "^2.11.1"
   },
