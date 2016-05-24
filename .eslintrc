@@ -1,3 +1,5 @@
 extends:
   - moqada
   - moqada/node
+rules:
+  node/no-unsupported-features: 0
