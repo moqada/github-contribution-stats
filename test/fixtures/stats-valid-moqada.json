@@ -1469,12 +1469,14 @@
   "currentStreak": {
     "days": 139,
     "end": "2016-01-22",
-    "start": "2015-09-06"
+    "start": "2015-09-06",
+    "unmeasurable": false
   },
   "longestStreak": {
     "days": 139,
     "end": "2016-01-22",
-    "start": "2015-09-06"
+    "start": "2015-09-06",
+    "unmeasurable": false
   },
   "summary": {
     "busiestDay": {

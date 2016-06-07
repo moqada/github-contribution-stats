@@ -1,5 +1,4 @@
 import fetch from 'isomorphic-fetch';
-import moment from 'moment';
 import cheerio from 'cheerio';
 
 const STATUS_OK = 200;
@@ -24,8 +23,8 @@ const STATUS_NOT_FOUND = 404;
  *     ...
  *   ],
  *   calendar: '<svg>....</svg>'
- *   currentStreak: {days: 0, end: null, start: null, last: '2016-01-23T08:00:00Z' },
- *   longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16' },
+ *   currentStreak: {days: 0, end: null, start: null, unmeasurable: false},
+ *   longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16', unmeasurable: false},
  *   summary: {
  *     busiestDay: {date: '2015-11-02', count: 34},
  *     end: '2016-01-23',
@@ -35,17 +34,11 @@ const STATUS_NOT_FOUND = 404;
  * }
  */
 /**
- * @typedef {Object} CurrentStreak
+ * @typedef {Object} Streak
  * @property {number} days - Days
  * @property {?string} end - End date
  * @property {?string} start - Start date
- * @property {?string} [last] - Last datetime of contribution when current streak is 0
- */
-/**
- * @typedef {Object} LongestStreak
- * @property {number} days - Days
- * @property {?string} end - End date
- * @property {?string} start - Start date
+ * @property {boolean} unmeasurable - Streak is over than 1 year
  */
 
 
@@ -60,10 +53,8 @@ const STATUS_NOT_FOUND = 404;
 export function fetchStats(username, {summary = true} = {}) {
   return fetchContributions(username).then(contributionData => {
     const {contributions} = contributionData;
-    const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
-    return fetchStreaks(username, {currentDate}).then(streakData => {
-      return Object.assign({}, contributionData, streakData);
-    });
+    const streakData = getStreaks(contributions);
+    return Object.assign({}, contributionData, streakData);
   }).then(result => {
     const res = Object.assign({}, result);
     if (summary) {
@@ -92,44 +83,6 @@ export function fetchContributions(username) {
 
 
 /**
- * Fetch streaks of GitHub user
- *
- * Sometimes, it cannot get streaks DOM because did not render in GitHub website.
- * In that case, it comes to be success when it request over second times.
- *
- * @param {string} username - GitHub username
- * @param {Object} [opts] - Options
- * @param {Date} [opts.currentDate] - Current date ex. YYYY-MM-DD
- * @return {Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>}
- */
-export function fetchStreaks(username, opts = {}) {
-  let {currentDate} = opts;
-  return fetchGitHub(`https://github.com/${username}`)
-    .then(html => {
-      const $html = cheerio.load(html);
-      if (!isUser(username, $html)) {
-        throw new Error('USER_NOT_FOUND');
-      }
-      const $columns = $html('#contributions-calendar > .contrib-column');
-      if ($columns.length === 0) {
-        throw new Error('CANNOT_FETCH_STREAKS');
-      }
-      const longest = parseContribColumn($columns.eq(1));
-      const current = parseContribColumn($columns.eq(2));
-      if (!currentDate) {
-        // XXX: Sometimes, Total columns and contributions are not equal end date.
-        const contributions = parseCalendar($html('#contributions-calendar svg'));
-        currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
-      }
-      return {
-        currentStreak: parseStreaks(current, currentDate),
-        longestStreak: parseStreaks(longest, currentDate)
-      };
-    });
-}
-
-
-/**
  * Fetch HTML from GitHub
  *
  * @param {string} url - URL
@@ -148,62 +101,36 @@ function fetchGitHub(url) {
 
 
 /**
- * Decide GitHub user page or not
- *
- * @param {string} username - GitHub username
- * @param {Object} $html - cheerio object
- * @return {boolean}
- */
-function isUser(username, $html) {
-  const atomUrl = $html('head > link[title=atom]').attr('href');
-  return atomUrl && atomUrl === `/${username}.atom`;
-}
-
-
-/**
- * Parse HTML of `contrib-column` to data
- *
- * @param {Object} $column - cheerio object
- * @return {{number: number, start: (string|null), end: (string|null), last: (string|null)}}
- */
-function parseContribColumn($column) {
-  const number = parseInt($column.find('.contrib-number').text().split(' ')[0], 10);
-  const $range = $column.find('.text-muted').last();
-  const last = $range.find('time').attr('datetime') || null;
-  let end = null;
-  let start = null;
-  if (!last) {
-    const rangeText = $range.text();
-    [start, end] = rangeText.split('\u2013').map(s => s.trim());
-  }
-  return {number, end, start, last};
-}
-
-
-/**
  * Parse data to streak
  *
- * @param {{number: number, start: (string|null), end: (string|null), last: (string|null)}} data - ret of parseContribColumn
- * @param {Date} currentDate - current date
- * @return {{days: number, end: (string|null), start: (string|null), last: (string|null)}}
+ * @param {Array<{date: string, count: number}>} contributions - List of contributions
+ * @return {{currentStreak: Streak, longestStreak: Streak}}
  */
-function parseStreaks(data, currentDate) {
-  const result = {days: data.number, end: null, start: null};
-  if (data.number === 0) {
-    if (data.last) {
-      return Object.assign({}, result, {last: data.last});
+function getStreaks(contributions) {
+  const start = contributions[0].date;
+  const end = contributions.slice(-1)[0].date;
+  const streak = {days: 0, start: null, end: null, unmeasurable: false};
+  let currentStreak = Object.assign({}, streak);
+  let longestStreak = Object.assign({}, streak);
+  contributions.forEach(ret => {
+    if (ret.count > 0) {
+      currentStreak.days += 1;
+      currentStreak.end = ret.date;
+      if (!currentStreak.start) {
+        currentStreak.start = ret.date;
+      }
+      if (currentStreak.days >= longestStreak.days) {
+        longestStreak = Object.assign({}, currentStreak);
+      }
+    } else if (ret.date !== end) {
+      currentStreak = Object.assign({}, streak);
     }
-    return result;
-  }
-  const end = moment(data.end, 'MMM, D').year(currentDate.getFullYear());
-  if (end.diff(currentDate) > 0) {
-    end.subtract(1, 'years');
-  }
-  const start = end.clone().subtract(result.days - 1, 'days');
-  return Object.assign({}, result, {
-    end: end.format('YYYY-MM-DD'),
-    start: start.format('YYYY-MM-DD')
   });
+  if (currentStreak.start === start && currentStreak.end === end) {
+    currentStreak.unmeasurable = true;
+    longestStreak.unmeasurable = true;
+  }
+  return {currentStreak, longestStreak};
 }
 
 
