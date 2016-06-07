@@ -34,17 +34,14 @@
     
   <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchContributions">fetchContributions</a></span></span></li>
 <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStats">fetchStats</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span></span></li>
 <li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Stats">Stats</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Streak">Streak</a></span></span></li>
 </ul>
 </div>
 </nav>
 
 <div class="content" data-ice="content"><h1 data-ice="title">src/index.js</h1>
 <pre class="source-code line-number raw-source-code"><code class="prettyprint linenums" data-ice="content">import fetch from &apos;isomorphic-fetch&apos;;
-import moment from &apos;moment&apos;;
 import cheerio from &apos;cheerio&apos;;
 
 const STATUS_OK = 200;
@@ -69,8 +66,8 @@ const STATUS_NOT_FOUND = 404;
  *     ...
  *   ],
  *   calendar: &apos;&lt;svg&gt;....&lt;/svg&gt;&apos;
- *   currentStreak: {days: 0, end: null, start: null, last: &apos;2016-01-23T08:00:00Z&apos; },
- *   longestStreak: {days: 5, end: &apos;2016-01-12&apos;, start: &apos;2016-01-16&apos; },
+ *   currentStreak: {days: 0, end: null, start: null, unmeasurable: false},
+ *   longestStreak: {days: 5, end: &apos;2016-01-12&apos;, start: &apos;2016-01-16&apos;, unmeasurable: false},
  *   summary: {
  *     busiestDay: {date: &apos;2015-11-02&apos;, count: 34},
  *     end: &apos;2016-01-23&apos;,
@@ -80,17 +77,11 @@ const STATUS_NOT_FOUND = 404;
  * }
  */
 /**
- * @typedef {Object} CurrentStreak
+ * @typedef {Object} Streak
  * @property {number} days - Days
  * @property {?string} end - End date
  * @property {?string} start - Start date
- * @property {?string} [last] - Last datetime of contribution when current streak is 0
- */
-/**
- * @typedef {Object} LongestStreak
- * @property {number} days - Days
- * @property {?string} end - End date
- * @property {?string} start - Start date
+ * @property {boolean} unmeasurable - Streak is over than 1 year
  */
 
 
@@ -105,10 +96,8 @@ const STATUS_NOT_FOUND = 404;
 export function fetchStats(username, {summary = true} = {}) {
   return fetchContributions(username).then(contributionData =&gt; {
     const {contributions} = contributionData;
-    const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
-    return fetchStreaks(username, {currentDate}).then(streakData =&gt; {
-      return Object.assign({}, contributionData, streakData);
-    });
+    const streakData = getStreaks(contributions);
+    return Object.assign({}, contributionData, streakData);
   }).then(result =&gt; {
     const res = Object.assign({}, result);
     if (summary) {
@@ -137,43 +126,6 @@ export function fetchContributions(username) {
 
 
 /**
- * Fetch streaks of GitHub user
- *
- * Sometimes, it cannot get streaks DOM because did not render in GitHub website.
- * In that case, it comes to be success when it request over second times.
- *
- * @param {string} username - GitHub username
- * @param {Date} [currentDate] - Current date ex. YYYY-MM-DD
- * @return {Promise&lt;{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error&gt;}
- */
-export function fetchStreaks(username, opts = {}) {
-  let {currentDate} = opts;
-  return fetchGitHub(`https://github.com/${username}`)
-    .then(html =&gt; {
-      const $html = cheerio.load(html);
-      if (!isUser(username, $html)) {
-        throw new Error(&apos;USER_NOT_FOUND&apos;);
-      }
-      const $columns = $html(&apos;#contributions-calendar &gt; .contrib-column&apos;);
-      if ($columns.length === 0) {
-        throw new Error(&apos;CANNOT_FETCH_STREAKS&apos;);
-      }
-      const longest = parseContribColumn($columns.eq(1));
-      const current = parseContribColumn($columns.eq(2));
-      if (!currentDate) {
-        // XXX: Sometimes, Total columns and contributions are not equal end date.
-        const contributions = parseCalendar($html(&apos;#contributions-calendar svg&apos;));
-        currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();
-      }
-      return {
-        currentStreak: parseStreaks(current, currentDate),
-        longestStreak: parseStreaks(longest, currentDate)
-      };
-    });
-}
-
-
-/**
  * Fetch HTML from GitHub
  *
  * @param {string} url - URL
@@ -192,62 +144,36 @@ function fetchGitHub(url) {
 
 
 /**
- * Decide GitHub user page or not
- *
- * @param {string} username - GitHub username
- * @param {Object} $html - cheerio object
- * @return {boolean}
- */
-function isUser(username, $html) {
-  const atomUrl = $html(&apos;head &gt; link[title=atom]&apos;).attr(&apos;href&apos;);
-  return atomUrl &amp;&amp; atomUrl === `/${username}.atom`;
-}
-
-
-/**
- * Parse HTML of `contrib-column` to data
- *
- * @param {Object} $column - cheerio object
- * @return {{number: number, start: (string|null), end: (string|null), last: (string|null)}}
- */
-function parseContribColumn($column) {
-  const number = parseInt($column.find(&apos;.contrib-number&apos;).text().split(&apos; &apos;)[0], 10);
-  const $range = $column.find(&apos;.text-muted&apos;).last();
-  const last = $range.find(&apos;time&apos;).attr(&apos;datetime&apos;) || null;
-  let end = null;
-  let start = null;
-  if (!last) {
-    const rangeText = $range.text();
-    [start, end] = rangeText.split(&apos;\u2013&apos;).map(s =&gt; s.trim());
-  }
-  return {number, end, start, last};
-}
-
-
-/**
  * Parse data to streak
  *
- * @param {{number: number, start: (string|null), end: (string|null), last: (string|null)}} data - ret of parseContribColumn
- * @param {Date} currentDate - current date
- * @return {{days: number, end: (string|null), start: (string|null), last: (string|null)}}
+ * @param {Array&lt;{date: string, count: number}&gt;} contributions - List of contributions
+ * @return {{currentStreak: Streak, longestStreak: Streak}}
  */
-function parseStreaks(data, currentDate) {
-  const result = {days: data.number, end: null, start: null};
-  if (data.number === 0) {
-    if (data.last) {
-      return Object.assign({}, result, {last: data.last});
+function getStreaks(contributions) {
+  const start = contributions[0].date;
+  const end = contributions.slice(-1)[0].date;
+  const streak = {days: 0, start: null, end: null, unmeasurable: false};
+  let currentStreak = Object.assign({}, streak);
+  let longestStreak = Object.assign({}, streak);
+  contributions.forEach(ret =&gt; {
+    if (ret.count &gt; 0) {
+      currentStreak.days += 1;
+      currentStreak.end = ret.date;
+      if (!currentStreak.start) {
+        currentStreak.start = ret.date;
+      }
+      if (currentStreak.days &gt;= longestStreak.days) {
+        longestStreak = Object.assign({}, currentStreak);
+      }
+    } else if (ret.date !== end) {
+      currentStreak = Object.assign({}, streak);
     }
-    return result;
-  }
-  const end = moment(data.end, &apos;MMM, D&apos;).year(currentDate.getFullYear());
-  if (end.diff(currentDate) &gt; 0) {
-    end.subtract(1, &apos;years&apos;);
-  }
-  const start = end.clone().subtract(result.days - 1, &apos;days&apos;);
-  return Object.assign({}, result, {
-    end: end.format(&apos;YYYY-MM-DD&apos;),
-    start: start.format(&apos;YYYY-MM-DD&apos;)
   });
+  if (currentStreak.start === start &amp;&amp; currentStreak.end === end) {
+    currentStreak.unmeasurable = true;
+    longestStreak.unmeasurable = true;
+  }
+  return {currentStreak, longestStreak};
 }
 
 
@@ -301,7 +227,7 @@ function summarizeContributions(contributions) {
 </div>
 
 <footer class="footer">
-  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.3)</span></a>
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.7)</span></a>
 </footer>
 
 <script src="script/search_index.js"></script>

@@ -10,7 +10,7 @@
     "access": null,
     "description": null,
     "lineNumber": 1,
-    "content": "import fetch from 'isomorphic-fetch';\nimport moment from 'moment';\nimport cheerio from 'cheerio';\n\nconst STATUS_OK = 200;\nconst STATUS_NOT_FOUND = 404;\n\n/**\n * @typedef {Object} Stats\n * @property {Array<{date: string, count: number}>} contributions - List of contributions\n * @property {CurrentStreak} currentStreak - Current streak\n * @property {LongestStreak} longestStreak - Longest streak\n * @property {Object} [summary] - Summary of contributions\n * @property {string} summary.start - Start date of contributions\n * @property {string} summary.end - End date of contributions\n * @property {string} summary.total - Total contributions\n * @property {?{date: string, count: number}} [summary.busiestDay] - Busiest day of contributions\n * @propety {string} [calendar] - SVG of contributions calendar\n *\n * @example\n * {\n *   contributions: [\n *     {date: '2015-01-23', count: 0},\n *     ...\n *   ],\n *   calendar: '<svg>....</svg>'\n *   currentStreak: {days: 0, end: null, start: null, last: '2016-01-23T08:00:00Z' },\n *   longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16' },\n *   summary: {\n *     busiestDay: {date: '2015-11-02', count: 34},\n *     end: '2016-01-23',\n *     start: '2015-01-23',\n *     total: 1271\n *   }\n * }\n */\n/**\n * @typedef {Object} CurrentStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n * @property {?string} [last] - Last datetime of contribution when current streak is 0\n */\n/**\n * @typedef {Object} LongestStreak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n */\n\n\n/**\n * Fetch contributions and streaks of GitHub user\n *\n * @param {string} username GitHub username\n * @param {Object} [opts] Options\n * @param {boolean} [opts.summary=true] Flag of includes summary\n * @return {Promise<Stats, Error>}\n */\nexport function fetchStats(username, {summary = true} = {}) {\n  return fetchContributions(username).then(contributionData => {\n    const {contributions} = contributionData;\n    const currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();\n    return fetchStreaks(username, {currentDate}).then(streakData => {\n      return Object.assign({}, contributionData, streakData);\n    });\n  }).then(result => {\n    const res = Object.assign({}, result);\n    if (summary) {\n      return Object.assign({}, res, {summary: summarizeContributions(res.contributions)});\n    }\n    return res;\n  });\n}\n\n\n/**\n * Fetch contributions of GitHub user\n *\n * @param {string} username - GitHub username\n * @return {Promise<{calendar: string, contributions: Array<{date: string, count: number}>}, Error>}\n */\nexport function fetchContributions(username) {\n  return fetchGitHub(`https://github.com/users/${username}/contributions`)\n    .then(html => {\n      return {\n        calendar: html,\n        contributions: parseCalendar(cheerio(html))\n      };\n    });\n}\n\n\n/**\n * Fetch streaks of GitHub user\n *\n * Sometimes, it cannot get streaks DOM because did not render in GitHub website.\n * In that case, it comes to be success when it request over second times.\n *\n * @param {string} username - GitHub username\n * @param {Date} [currentDate] - Current date ex. YYYY-MM-DD\n * @return {Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>}\n */\nexport function fetchStreaks(username, opts = {}) {\n  let {currentDate} = opts;\n  return fetchGitHub(`https://github.com/${username}`)\n    .then(html => {\n      const $html = cheerio.load(html);\n      if (!isUser(username, $html)) {\n        throw new Error('USER_NOT_FOUND');\n      }\n      const $columns = $html('#contributions-calendar > .contrib-column');\n      if ($columns.length === 0) {\n        throw new Error('CANNOT_FETCH_STREAKS');\n      }\n      const longest = parseContribColumn($columns.eq(1));\n      const current = parseContribColumn($columns.eq(2));\n      if (!currentDate) {\n        // XXX: Sometimes, Total columns and contributions are not equal end date.\n        const contributions = parseCalendar($html('#contributions-calendar svg'));\n        currentDate = moment.utc(contributions.slice(-1)[0].date).toDate();\n      }\n      return {\n        currentStreak: parseStreaks(current, currentDate),\n        longestStreak: parseStreaks(longest, currentDate)\n      };\n    });\n}\n\n\n/**\n * Fetch HTML from GitHub\n *\n * @param {string} url - URL\n * @return {Promise<string, Error>}\n */\nfunction fetchGitHub(url) {\n  return fetch(url).then(res => {\n    if (res.status === STATUS_NOT_FOUND) {\n      throw new Error('USER_NOT_FOUND');\n    } else if (res.status !== STATUS_OK) {\n      throw new Error('CANNOT_FETCH_DATA');\n    }\n    return res.text();\n  });\n}\n\n\n/**\n * Decide GitHub user page or not\n *\n * @param {string} username - GitHub username\n * @param {Object} $html - cheerio object\n * @return {boolean}\n */\nfunction isUser(username, $html) {\n  const atomUrl = $html('head > link[title=atom]').attr('href');\n  return atomUrl && atomUrl === `/${username}.atom`;\n}\n\n\n/**\n * Parse HTML of `contrib-column` to data\n *\n * @param {Object} $column - cheerio object\n * @return {{number: number, start: (string|null), end: (string|null), last: (string|null)}}\n */\nfunction parseContribColumn($column) {\n  const number = parseInt($column.find('.contrib-number').text().split(' ')[0], 10);\n  const $range = $column.find('.text-muted').last();\n  const last = $range.find('time').attr('datetime') || null;\n  let end = null;\n  let start = null;\n  if (!last) {\n    const rangeText = $range.text();\n    [start, end] = rangeText.split('\\u2013').map(s => s.trim());\n  }\n  return {number, end, start, last};\n}\n\n\n/**\n * Parse data to streak\n *\n * @param {{number: number, start: (string|null), end: (string|null), last: (string|null)}} data - ret of parseContribColumn\n * @param {Date} currentDate - current date\n * @return {{days: number, end: (string|null), start: (string|null), last: (string|null)}}\n */\nfunction parseStreaks(data, currentDate) {\n  const result = {days: data.number, end: null, start: null};\n  if (data.number === 0) {\n    if (data.last) {\n      return Object.assign({}, result, {last: data.last});\n    }\n    return result;\n  }\n  const end = moment(data.end, 'MMM, D').year(currentDate.getFullYear());\n  if (end.diff(currentDate) > 0) {\n    end.subtract(1, 'years');\n  }\n  const start = end.clone().subtract(result.days - 1, 'days');\n  return Object.assign({}, result, {\n    end: end.format('YYYY-MM-DD'),\n    start: start.format('YYYY-MM-DD')\n  });\n}\n\n\n/**\n * Parse HTML to list of contribution\n *\n * @param {Object} $calendar - cheerio object\n * @return {Array<{date: string, count: number}>}\n */\nfunction parseCalendar($calendar) {\n  const data = [];\n  $calendar.find('rect').each((i, elm) => {\n    const $rect = cheerio(elm);\n    const date = $rect.attr('data-date');\n    if (!date) {\n      return;\n    }\n    data.push({\n      date,\n      count: parseInt($rect.attr('data-count'), 10)\n    });\n  });\n  return data;\n}\n\n\n/**\n * Summarize list of contribution\n *\n * @param {Array<{date: string, count: number}>} contributions - List of contribution\n * @return {{end: string, start: string, total: number, busiestDay: {date: string, count: number}}}\n */\nfunction summarizeContributions(contributions) {\n  let busiestDay = null;\n  let total = 0;\n  contributions.forEach(d => {\n    if (d.count > 0 && (!busiestDay || d.count > busiestDay.count)) {\n      busiestDay = d;\n    }\n    total += d.count;\n  });\n  return {\n    busiestDay,\n    end: contributions.slice(-1)[0].date,\n    start: contributions[0].date,\n    total\n  };\n}\n"
+    "content": "import fetch from 'isomorphic-fetch';\nimport cheerio from 'cheerio';\n\nconst STATUS_OK = 200;\nconst STATUS_NOT_FOUND = 404;\n\n/**\n * @typedef {Object} Stats\n * @property {Array<{date: string, count: number}>} contributions - List of contributions\n * @property {CurrentStreak} currentStreak - Current streak\n * @property {LongestStreak} longestStreak - Longest streak\n * @property {Object} [summary] - Summary of contributions\n * @property {string} summary.start - Start date of contributions\n * @property {string} summary.end - End date of contributions\n * @property {string} summary.total - Total contributions\n * @property {?{date: string, count: number}} [summary.busiestDay] - Busiest day of contributions\n * @propety {string} [calendar] - SVG of contributions calendar\n *\n * @example\n * {\n *   contributions: [\n *     {date: '2015-01-23', count: 0},\n *     ...\n *   ],\n *   calendar: '<svg>....</svg>'\n *   currentStreak: {days: 0, end: null, start: null, unmeasurable: false},\n *   longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16', unmeasurable: false},\n *   summary: {\n *     busiestDay: {date: '2015-11-02', count: 34},\n *     end: '2016-01-23',\n *     start: '2015-01-23',\n *     total: 1271\n *   }\n * }\n */\n/**\n * @typedef {Object} Streak\n * @property {number} days - Days\n * @property {?string} end - End date\n * @property {?string} start - Start date\n * @property {boolean} unmeasurable - Streak is over than 1 year\n */\n\n\n/**\n * Fetch contributions and streaks of GitHub user\n *\n * @param {string} username GitHub username\n * @param {Object} [opts] Options\n * @param {boolean} [opts.summary=true] Flag of includes summary\n * @return {Promise<Stats, Error>}\n */\nexport function fetchStats(username, {summary = true} = {}) {\n  return fetchContributions(username).then(contributionData => {\n    const {contributions} = contributionData;\n    const streakData = getStreaks(contributions);\n    return Object.assign({}, contributionData, streakData);\n  }).then(result => {\n    const res = Object.assign({}, result);\n    if (summary) {\n      return Object.assign({}, res, {summary: summarizeContributions(res.contributions)});\n    }\n    return res;\n  });\n}\n\n\n/**\n * Fetch contributions of GitHub user\n *\n * @param {string} username - GitHub username\n * @return {Promise<{calendar: string, contributions: Array<{date: string, count: number}>}, Error>}\n */\nexport function fetchContributions(username) {\n  return fetchGitHub(`https://github.com/users/${username}/contributions`)\n    .then(html => {\n      return {\n        calendar: html,\n        contributions: parseCalendar(cheerio(html))\n      };\n    });\n}\n\n\n/**\n * Fetch HTML from GitHub\n *\n * @param {string} url - URL\n * @return {Promise<string, Error>}\n */\nfunction fetchGitHub(url) {\n  return fetch(url).then(res => {\n    if (res.status === STATUS_NOT_FOUND) {\n      throw new Error('USER_NOT_FOUND');\n    } else if (res.status !== STATUS_OK) {\n      throw new Error('CANNOT_FETCH_DATA');\n    }\n    return res.text();\n  });\n}\n\n\n/**\n * Parse data to streak\n *\n * @param {Array<{date: string, count: number}>} contributions - List of contributions\n * @return {{currentStreak: Streak, longestStreak: Streak}}\n */\nfunction getStreaks(contributions) {\n  const start = contributions[0].date;\n  const end = contributions.slice(-1)[0].date;\n  const streak = {days: 0, start: null, end: null, unmeasurable: false};\n  let currentStreak = Object.assign({}, streak);\n  let longestStreak = Object.assign({}, streak);\n  contributions.forEach(ret => {\n    if (ret.count > 0) {\n      currentStreak.days += 1;\n      currentStreak.end = ret.date;\n      if (!currentStreak.start) {\n        currentStreak.start = ret.date;\n      }\n      if (currentStreak.days >= longestStreak.days) {\n        longestStreak = Object.assign({}, currentStreak);\n      }\n    } else if (ret.date !== end) {\n      currentStreak = Object.assign({}, streak);\n    }\n  });\n  if (currentStreak.start === start && currentStreak.end === end) {\n    currentStreak.unmeasurable = true;\n    longestStreak.unmeasurable = true;\n  }\n  return {currentStreak, longestStreak};\n}\n\n\n/**\n * Parse HTML to list of contribution\n *\n * @param {Object} $calendar - cheerio object\n * @return {Array<{date: string, count: number}>}\n */\nfunction parseCalendar($calendar) {\n  const data = [];\n  $calendar.find('rect').each((i, elm) => {\n    const $rect = cheerio(elm);\n    const date = $rect.attr('data-date');\n    if (!date) {\n      return;\n    }\n    data.push({\n      date,\n      count: parseInt($rect.attr('data-count'), 10)\n    });\n  });\n  return data;\n}\n\n\n/**\n * Summarize list of contribution\n *\n * @param {Array<{date: string, count: number}>} contributions - List of contribution\n * @return {{end: string, start: string, total: number, busiestDay: {date: string, count: number}}}\n */\nfunction summarizeContributions(contributions) {\n  let busiestDay = null;\n  let total = 0;\n  contributions.forEach(d => {\n    if (d.count > 0 && (!busiestDay || d.count > busiestDay.count)) {\n      busiestDay = d;\n    }\n    total += d.count;\n  });\n  return {\n    busiestDay,\n    end: contributions.slice(-1)[0].date,\n    start: contributions[0].date,\n    total\n  };\n}\n"
   },
   {
     "__docId__": 1,
@@ -25,7 +25,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": null,
-    "lineNumber": 5,
+    "lineNumber": 4,
     "undocument": true,
     "type": {
       "types": [
@@ -46,7 +46,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": null,
-    "lineNumber": 6,
+    "lineNumber": 5,
     "undocument": true,
     "type": {
       "types": [
@@ -63,9 +63,9 @@
     "memberof": "src/index.js",
     "longname": "src/index.js~Stats",
     "access": null,
-    "description": null,
+    "description": "",
     "examples": [
-      "{\n  contributions: [\n    {date: '2015-01-23', count: 0},\n    ...\n  ],\n  calendar: '<svg>....</svg>'\n  currentStreak: {days: 0, end: null, start: null, last: '2016-01-23T08:00:00Z' },\n  longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16' },\n  summary: {\n    busiestDay: {date: '2015-11-02', count: 34},\n    end: '2016-01-23',\n    start: '2015-01-23',\n    total: 1271\n  }\n}"
+      "{\n  contributions: [\n    {date: '2015-01-23', count: 0},\n    ...\n  ],\n  calendar: '<svg>....</svg>'\n  currentStreak: {days: 0, end: null, start: null, unmeasurable: false},\n  longestStreak: {days: 5, end: '2016-01-12', start: '2016-01-16', unmeasurable: false},\n  summary: {\n    busiestDay: {date: '2015-11-02', count: 34},\n    end: '2016-01-23',\n    start: '2015-01-23',\n    total: 1271\n  }\n}"
     ],
     "unknown": [
       {
@@ -168,11 +168,11 @@
     "kind": "typedef",
     "static": true,
     "variation": null,
-    "name": "CurrentStreak",
+    "name": "Streak",
     "memberof": "src/index.js",
-    "longname": "src/index.js~CurrentStreak",
+    "longname": "src/index.js~Streak",
     "access": null,
-    "description": null,
+    "description": "",
     "properties": [
       {
         "nullable": null,
@@ -205,14 +205,14 @@
         "description": "Start date"
       },
       {
-        "nullable": true,
+        "nullable": null,
         "types": [
-          "string"
+          "boolean"
         ],
         "spread": false,
-        "optional": true,
-        "name": "last",
-        "description": "Last datetime of contribution when current streak is 0"
+        "optional": false,
+        "name": "unmeasurable",
+        "description": "Streak is over than 1 year"
       }
     ],
     "type": {
@@ -220,61 +220,11 @@
         "Object"
       ],
       "optional": false,
-      "name": "CurrentStreak"
+      "name": "Streak"
     }
   },
   {
     "__docId__": 5,
-    "kind": "typedef",
-    "static": true,
-    "variation": null,
-    "name": "LongestStreak",
-    "memberof": "src/index.js",
-    "longname": "src/index.js~LongestStreak",
-    "access": null,
-    "description": null,
-    "properties": [
-      {
-        "nullable": null,
-        "types": [
-          "number"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "days",
-        "description": "Days"
-      },
-      {
-        "nullable": true,
-        "types": [
-          "string"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "end",
-        "description": "End date"
-      },
-      {
-        "nullable": true,
-        "types": [
-          "string"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "start",
-        "description": "Start date"
-      }
-    ],
-    "type": {
-      "types": [
-        "Object"
-      ],
-      "optional": false,
-      "name": "LongestStreak"
-    }
-  },
-  {
-    "__docId__": 6,
     "kind": "function",
     "static": true,
     "variation": null,
@@ -286,7 +236,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": "{fetchStats}",
     "description": "Fetch contributions and streaks of GitHub user",
-    "lineNumber": 60,
+    "lineNumber": 53,
     "params": [
       {
         "nullable": null,
@@ -332,7 +282,7 @@
     "generator": false
   },
   {
-    "__docId__": 7,
+    "__docId__": 6,
     "kind": "function",
     "static": true,
     "variation": null,
@@ -344,7 +294,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": "{fetchContributions}",
     "description": "Fetch contributions of GitHub user",
-    "lineNumber": 83,
+    "lineNumber": 74,
     "params": [
       {
         "nullable": null,
@@ -368,53 +318,7 @@
     "generator": false
   },
   {
-    "__docId__": 8,
-    "kind": "function",
-    "static": true,
-    "variation": null,
-    "name": "fetchStreaks",
-    "memberof": "src/index.js",
-    "longname": "src/index.js~fetchStreaks",
-    "access": null,
-    "export": true,
-    "importPath": "github-contribution-stats/src/index.js",
-    "importStyle": "{fetchStreaks}",
-    "description": "Fetch streaks of GitHub user\n\nSometimes, it cannot get streaks DOM because did not render in GitHub website.\nIn that case, it comes to be success when it request over second times.",
-    "lineNumber": 104,
-    "params": [
-      {
-        "nullable": null,
-        "types": [
-          "string"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "username",
-        "description": "GitHub username"
-      },
-      {
-        "nullable": null,
-        "types": [
-          "Date"
-        ],
-        "spread": false,
-        "optional": true,
-        "name": "currentDate",
-        "description": "Current date ex. YYYY-MM-DD"
-      }
-    ],
-    "return": {
-      "nullable": null,
-      "types": [
-        "Promise<{currentStreak: CurrentStreak, longestStreak: LongestStreak}, Error>"
-      ],
-      "spread": false,
-      "description": ""
-    },
-    "generator": false
-  },
-  {
-    "__docId__": 9,
+    "__docId__": 7,
     "kind": "function",
     "static": true,
     "variation": null,
@@ -426,7 +330,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Fetch HTML from GitHub",
-    "lineNumber": 137,
+    "lineNumber": 91,
     "params": [
       {
         "nullable": null,
@@ -450,127 +354,35 @@
     "generator": false
   },
   {
-    "__docId__": 10,
+    "__docId__": 8,
     "kind": "function",
     "static": true,
     "variation": null,
-    "name": "isUser",
+    "name": "getStreaks",
     "memberof": "src/index.js",
-    "longname": "src/index.js~isUser",
-    "access": null,
-    "export": false,
-    "importPath": "github-contribution-stats/src/index.js",
-    "importStyle": null,
-    "description": "Decide GitHub user page or not",
-    "lineNumber": 156,
-    "params": [
-      {
-        "nullable": null,
-        "types": [
-          "string"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "username",
-        "description": "GitHub username"
-      },
-      {
-        "nullable": null,
-        "types": [
-          "Object"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "$html",
-        "description": "cheerio object"
-      }
-    ],
-    "return": {
-      "nullable": null,
-      "types": [
-        "boolean"
-      ],
-      "spread": false,
-      "description": ""
-    },
-    "generator": false
-  },
-  {
-    "__docId__": 11,
-    "kind": "function",
-    "static": true,
-    "variation": null,
-    "name": "parseContribColumn",
-    "memberof": "src/index.js",
-    "longname": "src/index.js~parseContribColumn",
-    "access": null,
-    "export": false,
-    "importPath": "github-contribution-stats/src/index.js",
-    "importStyle": null,
-    "description": "Parse HTML of `contrib-column` to data",
-    "lineNumber": 168,
-    "params": [
-      {
-        "nullable": null,
-        "types": [
-          "Object"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "$column",
-        "description": "cheerio object"
-      }
-    ],
-    "return": {
-      "nullable": null,
-      "types": [
-        "{number: number, start: (string|null), end: (string|null), last: (string|null)}"
-      ],
-      "spread": false,
-      "description": ""
-    },
-    "generator": false
-  },
-  {
-    "__docId__": 12,
-    "kind": "function",
-    "static": true,
-    "variation": null,
-    "name": "parseStreaks",
-    "memberof": "src/index.js",
-    "longname": "src/index.js~parseStreaks",
+    "longname": "src/index.js~getStreaks",
     "access": null,
     "export": false,
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Parse data to streak",
-    "lineNumber": 189,
+    "lineNumber": 109,
     "params": [
       {
         "nullable": null,
         "types": [
-          "{number: number, start: (string|null), end: (string|null), last: (string|null)}"
+          "Array<{date: string, count: number}>"
         ],
         "spread": false,
         "optional": false,
-        "name": "data",
-        "description": "ret of parseContribColumn"
-      },
-      {
-        "nullable": null,
-        "types": [
-          "Date"
-        ],
-        "spread": false,
-        "optional": false,
-        "name": "currentDate",
-        "description": "current date"
+        "name": "contributions",
+        "description": "List of contributions"
       }
     ],
     "return": {
       "nullable": null,
       "types": [
-        "{days: number, end: (string|null), start: (string|null), last: (string|null)}"
+        "{currentStreak: Streak, longestStreak: Streak}"
       ],
       "spread": false,
       "description": ""
@@ -578,7 +390,7 @@
     "generator": false
   },
   {
-    "__docId__": 13,
+    "__docId__": 9,
     "kind": "function",
     "static": true,
     "variation": null,
@@ -590,7 +402,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Parse HTML to list of contribution",
-    "lineNumber": 215,
+    "lineNumber": 143,
     "params": [
       {
         "nullable": null,
@@ -614,7 +426,7 @@
     "generator": false
   },
   {
-    "__docId__": 14,
+    "__docId__": 10,
     "kind": "function",
     "static": true,
     "variation": null,
@@ -626,7 +438,7 @@
     "importPath": "github-contribution-stats/src/index.js",
     "importStyle": null,
     "description": "Summarize list of contribution",
-    "lineNumber": 238,
+    "lineNumber": 166,
     "params": [
       {
         "nullable": null,
@@ -650,7 +462,7 @@
     "generator": false
   },
   {
-    "__docId__": 16,
+    "__docId__": 12,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -659,11 +471,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Infinity",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 17,
+    "__docId__": 13,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -672,11 +484,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~NaN",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 18,
+    "__docId__": 14,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -685,11 +497,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~undefined",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 19,
+    "__docId__": 15,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -698,11 +510,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~null",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 20,
+    "__docId__": 16,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -711,11 +523,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Object",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 21,
+    "__docId__": 17,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -724,11 +536,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~object",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 22,
+    "__docId__": 18,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -737,11 +549,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Function",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 23,
+    "__docId__": 19,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -750,11 +562,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~function",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 24,
+    "__docId__": 20,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -763,11 +575,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Boolean",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 25,
+    "__docId__": 21,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -776,11 +588,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~boolean",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 26,
+    "__docId__": 22,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -789,11 +601,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Symbol",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 27,
+    "__docId__": 23,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -802,11 +614,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Error",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 28,
+    "__docId__": 24,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -815,11 +627,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~EvalError",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 29,
+    "__docId__": 25,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -828,11 +640,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~InternalError",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 30,
+    "__docId__": 26,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -841,11 +653,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~RangeError",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 31,
+    "__docId__": 27,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -854,11 +666,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~ReferenceError",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 32,
+    "__docId__": 28,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -867,11 +679,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~SyntaxError",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 33,
+    "__docId__": 29,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -880,11 +692,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~TypeError",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 34,
+    "__docId__": 30,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -893,11 +705,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~URIError",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 35,
+    "__docId__": 31,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -906,11 +718,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Number",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 36,
+    "__docId__": 32,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -919,11 +731,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~number",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 37,
+    "__docId__": 33,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -932,11 +744,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Date",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 38,
+    "__docId__": 34,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -945,11 +757,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~String",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 39,
+    "__docId__": 35,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -958,11 +770,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~string",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 40,
+    "__docId__": 36,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -971,11 +783,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~RegExp",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 41,
+    "__docId__": 37,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -984,11 +796,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 42,
+    "__docId__": 38,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -997,11 +809,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Int8Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 43,
+    "__docId__": 39,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1010,11 +822,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 44,
+    "__docId__": 40,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1023,11 +835,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8ClampedArray",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 45,
+    "__docId__": 41,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1036,11 +848,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Int16Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 46,
+    "__docId__": 42,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1049,11 +861,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint16Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 47,
+    "__docId__": 43,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1062,11 +874,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Int32Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 48,
+    "__docId__": 44,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1075,11 +887,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint32Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 49,
+    "__docId__": 45,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1088,11 +900,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Float32Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 50,
+    "__docId__": 46,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1101,11 +913,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Float64Array",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 51,
+    "__docId__": 47,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1114,11 +926,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Map",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 52,
+    "__docId__": 48,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1127,11 +939,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Set",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 53,
+    "__docId__": 49,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1140,11 +952,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakMap",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 54,
+    "__docId__": 50,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1153,11 +965,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakSet",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 55,
+    "__docId__": 51,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1166,11 +978,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~ArrayBuffer",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 56,
+    "__docId__": 52,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1179,11 +991,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~DataView",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 57,
+    "__docId__": 53,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1192,11 +1004,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~JSON",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 58,
+    "__docId__": 54,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1205,11 +1017,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Promise",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 59,
+    "__docId__": 55,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1218,11 +1030,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Generator",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 60,
+    "__docId__": 56,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1231,11 +1043,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~GeneratorFunction",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 61,
+    "__docId__": 57,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1244,11 +1056,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Reflect",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 62,
+    "__docId__": 58,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1257,11 +1069,11 @@
     "memberof": "BuiltinExternal/ECMAScriptExternal.js",
     "longname": "BuiltinExternal/ECMAScriptExternal.js~Proxy",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 64,
+    "__docId__": 60,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1270,11 +1082,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~CanvasRenderingContext2D",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 65,
+    "__docId__": 61,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1283,11 +1095,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~DocumentFragment",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 66,
+    "__docId__": 62,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1296,11 +1108,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~Element",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 67,
+    "__docId__": 63,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1309,11 +1121,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~Event",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 68,
+    "__docId__": 64,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1322,11 +1134,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~Node",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 69,
+    "__docId__": 65,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1335,11 +1147,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~NodeList",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 70,
+    "__docId__": 66,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1348,11 +1160,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~XMLHttpRequest",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 71,
+    "__docId__": 67,
     "kind": "external",
     "static": true,
     "variation": null,
@@ -1361,11 +1173,11 @@
     "memberof": "BuiltinExternal/WebAPIExternal.js",
     "longname": "BuiltinExternal/WebAPIExternal.js~AudioContext",
     "access": null,
-    "description": null,
+    "description": "",
     "builtinExternal": true
   },
   {
-    "__docId__": 72,
+    "__docId__": 68,
     "kind": "testFile",
     "static": true,
     "variation": null,
@@ -1375,10 +1187,10 @@
     "access": null,
     "description": null,
     "lineNumber": 2,
-    "content": "/* eslint-disable no-magic-numbers, max-nested-callbacks */\nimport fs from 'fs';\nimport path from 'path';\nimport assert from 'power-assert';\nimport nock from 'nock';\nimport {fetchStats, fetchContributions, fetchStreaks} from '../src';\n\nconst fixtureDir = path.resolve('./test/fixtures');\n\ndescribe('github-contribution-stats', () => {\n  let mockHtml = null;\n  let mockSvg = null;\n  let mockServer = null;\n  before(() => {\n    mockHtml = fs.readFileSync(path.join(fixtureDir, 'moqada.html')).toString();\n    mockSvg = fs.readFileSync(path.join(fixtureDir, 'moqada.svg')).toString();\n  });\n  beforeEach(() => {\n    mockServer = nock('https://github.com');\n  });\n  afterEach(() => {\n    nock.cleanAll();\n  });\n\n  /** @test {fetchStats} */\n  describe('fetchStats()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/users/moqada/contributions')\n        .reply(200, mockSvg)\n        .get('/moqada')\n        .reply(200, mockHtml);\n    });\n\n    it('should return valid stats', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'stats-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchStats('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n\n    it('should return valid stats with summary option', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'stats-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      delete valid.summary;\n      return fetchStats('moqada', {summary: false}).then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n\n  /** @test {fetchContributions} */\n  describe('fetchContributions()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/users/moqada/contributions')\n        .reply(200, mockSvg);\n    });\n    it('should return valid contributions', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'contributions-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchContributions('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n\n  /** @test {fetchStreaks} */\n  describe('fetchStreaks()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/moqada')\n        .reply(200, mockHtml);\n    });\n    it('should return valid streaks', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'streaks-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchStreaks('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n});\n"
+    "content": "/* eslint-disable no-magic-numbers, max-nested-callbacks */\nimport fs from 'fs';\nimport path from 'path';\nimport assert from 'power-assert';\nimport nock from 'nock';\nimport {fetchStats, fetchContributions} from '../src';\n\nconst fixtureDir = path.resolve('./test/fixtures');\n\ndescribe('github-contribution-stats', () => {\n  let mockSvg = null;\n  let mockSvgUnmeasurable = null;\n  let mockServer = null;\n  before(() => {\n    mockSvg = fs.readFileSync(path.join(fixtureDir, 'moqada.svg')).toString();\n    mockSvgUnmeasurable = fs.readFileSync(\n      path.join(fixtureDir, 'unmeasurable-user.svg')).toString();\n  });\n  beforeEach(() => {\n    mockServer = nock('https://github.com');\n  });\n  afterEach(() => {\n    nock.cleanAll();\n  });\n\n  /** @test {fetchStats} */\n  describe('fetchStats()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/users/moqada/contributions')\n        .reply(200, mockSvg)\n        .get('/users/unmeasurable-user/contributions')\n        .reply(200, mockSvgUnmeasurable);\n    });\n\n    it('should return valid stats', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'stats-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchStats('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n\n    it('should return valid stats with summary option', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'stats-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      delete valid.summary;\n      return fetchStats('moqada', {summary: false}).then(stat => assert.deepEqual(stat, valid));\n    });\n\n    it('should return valid stats with unmeasurable contributions', () => {\n      const fixtureFile = fs.readFileSync(\n        path.join(fixtureDir, 'stats-valid-unmeasurable-user.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchStats('unmeasurable-user').then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n\n  /** @test {fetchContributions} */\n  describe('fetchContributions()', () => {\n    beforeEach(() => {\n      mockServer\n        .get('/users/moqada/contributions')\n        .reply(200, mockSvg);\n    });\n    it('should return valid contributions', () => {\n      const fixtureFile = fs.readFileSync(path.join(fixtureDir, 'contributions-valid-moqada.json'));\n      const valid = JSON.parse(fixtureFile.toString());\n      return fetchContributions('moqada').then(stat => assert.deepEqual(stat, valid));\n    });\n  });\n});\n"
   },
   {
-    "__docId__": 73,
+    "__docId__": 69,
     "kind": "testDescribe",
     "static": true,
     "variation": null,
@@ -1392,7 +1204,7 @@
     "lineNumber": 10
   },
   {
-    "__docId__": 74,
+    "__docId__": 70,
     "kind": "testDescribe",
     "static": true,
     "variation": null,
@@ -1403,7 +1215,7 @@
     "longname": "test/index-spec.js~describe0.describe1",
     "access": null,
     "description": "fetchStats()",
-    "lineNumber": 26,
+    "lineNumber": 27,
     "unknown": [
       {
         "tagName": "@test",
@@ -1415,7 +1227,7 @@
     ]
   },
   {
-    "__docId__": 75,
+    "__docId__": 71,
     "kind": "testIt",
     "static": true,
     "variation": null,
@@ -1426,10 +1238,10 @@
     "longname": "test/index-spec.js~describe0.describe1.it2",
     "access": null,
     "description": "should return valid stats",
-    "lineNumber": 35
+    "lineNumber": 36
   },
   {
-    "__docId__": 76,
+    "__docId__": 72,
     "kind": "testIt",
     "static": true,
     "variation": null,
@@ -1440,21 +1252,35 @@
     "longname": "test/index-spec.js~describe0.describe1.it3",
     "access": null,
     "description": "should return valid stats with summary option",
-    "lineNumber": 41
+    "lineNumber": 42
   },
   {
-    "__docId__": 77,
+    "__docId__": 73,
+    "kind": "testIt",
+    "static": true,
+    "variation": null,
+    "name": "it4",
+    "testId": 4,
+    "memberof": "test/index-spec.js~describe0.describe1",
+    "testDepth": 2,
+    "longname": "test/index-spec.js~describe0.describe1.it4",
+    "access": null,
+    "description": "should return valid stats with unmeasurable contributions",
+    "lineNumber": 49
+  },
+  {
+    "__docId__": 74,
     "kind": "testDescribe",
     "static": true,
     "variation": null,
-    "name": "describe4",
-    "testId": 4,
+    "name": "describe5",
+    "testId": 5,
     "memberof": "test/index-spec.js~describe0",
     "testDepth": 1,
-    "longname": "test/index-spec.js~describe0.describe4",
+    "longname": "test/index-spec.js~describe0.describe5",
     "access": null,
     "description": "fetchContributions()",
-    "lineNumber": 50,
+    "lineNumber": 58,
     "unknown": [
       {
         "tagName": "@test",
@@ -1466,54 +1292,17 @@
     ]
   },
   {
-    "__docId__": 78,
+    "__docId__": 75,
     "kind": "testIt",
     "static": true,
     "variation": null,
-    "name": "it5",
-    "testId": 5,
-    "memberof": "test/index-spec.js~describe0.describe4",
+    "name": "it6",
+    "testId": 6,
+    "memberof": "test/index-spec.js~describe0.describe5",
     "testDepth": 2,
-    "longname": "test/index-spec.js~describe0.describe4.it5",
+    "longname": "test/index-spec.js~describe0.describe5.it6",
     "access": null,
     "description": "should return valid contributions",
-    "lineNumber": 56
-  },
-  {
-    "__docId__": 79,
-    "kind": "testDescribe",
-    "static": true,
-    "variation": null,
-    "name": "describe6",
-    "testId": 6,
-    "memberof": "test/index-spec.js~describe0",
-    "testDepth": 1,
-    "longname": "test/index-spec.js~describe0.describe6",
-    "access": null,
-    "description": "fetchStreaks()",
-    "lineNumber": 64,
-    "unknown": [
-      {
-        "tagName": "@test",
-        "tagValue": "{fetchStreaks}"
-      }
-    ],
-    "testTargets": [
-      "fetchStreaks"
-    ]
-  },
-  {
-    "__docId__": 80,
-    "kind": "testIt",
-    "static": true,
-    "variation": null,
-    "name": "it7",
-    "testId": 7,
-    "memberof": "test/index-spec.js~describe0.describe6",
-    "testDepth": 2,
-    "longname": "test/index-spec.js~describe0.describe6.it7",
-    "access": null,
-    "description": "should return valid streaks",
-    "lineNumber": 70
+    "lineNumber": 64
   }
 ]

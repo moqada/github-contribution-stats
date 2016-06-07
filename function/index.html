@@ -34,10 +34,8 @@
     
   <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchContributions">fetchContributions</a></span></span></li>
 <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStats">fetchStats</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span></span></li>
 <li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Stats">Stats</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Streak">Streak</a></span></span></li>
 </ul>
 </div>
 </nav>
@@ -99,32 +97,6 @@
       
     </td>
   </tr>
-<tr data-ice="target">
-    <td>
-      <span class="access" data-ice="access">public</span>
-      
-      
-      
-      <span class="override" data-ice="override"></span>
-    </td>
-    <td>
-      <div>
-        <p>
-           <span data-ice="name"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></span><span data-ice="signature">(username: <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String">string</a></span>, currentDate: <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date">Date</a></span>): <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise">Promise</a></span><{currentstreak: <span=""><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a>, longestStreak: <span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span>}, <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error">Error</a></span>&gt;</{currentstreak:></span>
-        </p>
-      </div>
-      <div>
-        
-        
-        <div data-ice="description"><p>Fetch streaks of GitHub user</p>
-</div>
-      </div>
-    </td>
-    <td>
-      
-      
-    </td>
-  </tr>
 </tbody>
 </table>
 </div>
@@ -141,11 +113,11 @@
     <span class="right-info">
       
       
-      <span data-ice="source"><span><a href="file/src/index.js.html#lineNumber83">source</a></span></span>
+      <span data-ice="source"><span><a href="file/src/index.js.html#lineNumber74">source</a></span></span>
     </span>
   </h3>
 
-  <div data-ice="importPath" class="import-path"><pre class="prettyprint"><code data-ice="importPathCode">import {fetchContributions} from &apos;<span><a href="file/src/index.js.html#lineNumber83">github-contribution-stats/src/index.js</a></span>&apos;</code></pre></div>
+  <div data-ice="importPath" class="import-path"><pre class="prettyprint"><code data-ice="importPathCode">import {fetchContributions} from &apos;<span><a href="file/src/index.js.html#lineNumber74">github-contribution-stats/src/index.js</a></span>&apos;</code></pre></div>
   
   
   <div data-ice="description"><p>Fetch contributions of GitHub user</p>
@@ -197,7 +169,7 @@
     <h4>Test:</h4>
     <ul>
       
-    <li data-ice="test"><span><a href="test-file/test/index-spec.js.html#lineNumber50">github-contribution-stats fetchContributions()</a></span></li>
+    <li data-ice="test"><span><a href="test-file/test/index-spec.js.html#lineNumber58">github-contribution-stats fetchContributions()</a></span></li>
 </ul>
   </div>
 
@@ -215,11 +187,11 @@
     <span class="right-info">
       
       
-      <span data-ice="source"><span><a href="file/src/index.js.html#lineNumber60">source</a></span></span>
+      <span data-ice="source"><span><a href="file/src/index.js.html#lineNumber53">source</a></span></span>
     </span>
   </h3>
 
-  <div data-ice="importPath" class="import-path"><pre class="prettyprint"><code data-ice="importPathCode">import {fetchStats} from &apos;<span><a href="file/src/index.js.html#lineNumber60">github-contribution-stats/src/index.js</a></span>&apos;</code></pre></div>
+  <div data-ice="importPath" class="import-path"><pre class="prettyprint"><code data-ice="importPathCode">import {fetchStats} from &apos;<span><a href="file/src/index.js.html#lineNumber53">github-contribution-stats/src/index.js</a></span>&apos;</code></pre></div>
   
   
   <div data-ice="description"><p>Fetch contributions and streaks of GitHub user</p>
@@ -286,90 +258,7 @@
     <h4>Test:</h4>
     <ul>
       
-    <li data-ice="test"><span><a href="test-file/test/index-spec.js.html#lineNumber26">github-contribution-stats fetchStats()</a></span></li>
-</ul>
-  </div>
-
-  
-  
-</div>
-<div class="detail" data-ice="detail">
-  <h3 data-ice="anchor" id="static-function-fetchStreaks">
-    <span class="access" data-ice="access">public</span>
-    
-    
-    
-    
-    <span data-ice="name">fetchStreaks</span><span data-ice="signature">(username: <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String">string</a></span>, currentDate: <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date">Date</a></span>): <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise">Promise</a></span><{currentstreak: <span=""><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a>, longestStreak: <span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span>}, <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error">Error</a></span>&gt;</{currentstreak:></span>
-    <span class="right-info">
-      
-      
-      <span data-ice="source"><span><a href="file/src/index.js.html#lineNumber104">source</a></span></span>
-    </span>
-  </h3>
-
-  <div data-ice="importPath" class="import-path"><pre class="prettyprint"><code data-ice="importPathCode">import {fetchStreaks} from &apos;<span><a href="file/src/index.js.html#lineNumber104">github-contribution-stats/src/index.js</a></span>&apos;</code></pre></div>
-  
-  
-  <div data-ice="description"><p>Fetch streaks of GitHub user</p>
-<p>Sometimes, it cannot get streaks DOM because did not render in GitHub website.
-In that case, it comes to be success when it request over second times.</p>
-</div>
-
-  
-
-  <div data-ice="properties"><div data-ice="properties">
-  <h4 data-ice="title">Params:</h4>
-  <table class="params">
-    <thead>
-    <tr><td>Name</td><td>Type</td><td>Attribute</td><td>Description</td></tr>
-    </thead>
-    <tbody>
-    
-    <tr data-ice="property" data-depth="0">
-      <td data-ice="name" data-depth="0">username</td>
-      <td data-ice="type"><span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String">string</a></span></td>
-      <td data-ice="appendix"></td>
-      <td data-ice="description"><p>GitHub username</p>
-</td>
-    </tr>
-<tr data-ice="property" data-depth="0">
-      <td data-ice="name" data-depth="0">currentDate</td>
-      <td data-ice="type"><span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date">Date</a></span></td>
-      <td data-ice="appendix"><ul><li>optional</li></ul></td>
-      <td data-ice="description"><p>Current date ex. YYYY-MM-DD</p>
-</td>
-    </tr>
-</tbody>
-  </table>
-</div>
-</div>
-
-  <div class="return-params" data-ice="returnParams">
-    <h4>Return:</h4>
-    <table>
-      <tr>
-        <td class="return-type" data-ice="returnType"><span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise">Promise</a></span><{currentstreak: <span=""><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a>, longestStreak: <span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span>}, <span><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error">Error</a></span>&gt;</{currentstreak:></td>
-        
-      </tr>
-    </table>
-    <div data-ice="returnProperties">
-</div>
-  </div>
-
-  
-
-  
-
-  
-
-  
-
-  <div data-ice="tests">
-    <h4>Test:</h4>
-    <ul>
-      
-    <li data-ice="test"><span><a href="test-file/test/index-spec.js.html#lineNumber64">github-contribution-stats fetchStreaks()</a></span></li>
+    <li data-ice="test"><span><a href="test-file/test/index-spec.js.html#lineNumber27">github-contribution-stats fetchStats()</a></span></li>
 </ul>
   </div>
 
@@ -380,7 +269,7 @@ In that case, it comes to be success when it request over second times.</p>
 </div>
 
 <footer class="footer">
-  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.3)</span></a>
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.7)</span></a>
 </footer>
 
 <script src="script/search_index.js"></script>

@@ -12,12 +12,6 @@ window.esdocSearchIndex = [
     "function"
   ],
   [
-    "github-contribution-stats/src/index.js~fetchstreaks",
-    "function/index.html#static-function-fetchStreaks",
-    "<span>fetchStreaks</span> <span class=\"search-result-import-path\">github-contribution-stats/src/index.js</span>",
-    "function"
-  ],
-  [
     "builtinexternal/ecmascriptexternal.js~array",
     "external/index.html",
     "BuiltinExternal/ECMAScriptExternal.js~Array",
@@ -355,44 +349,38 @@ window.esdocSearchIndex = [
   ],
   [
     "fetchcontributions src/index.js~fetchcontributions,fetchcontributions",
-    "test-file/test/index-spec.js.html#lineNumber50",
+    "test-file/test/index-spec.js.html#lineNumber58",
     "github-contribution-stats fetchContributions()",
     "test"
   ],
   [
     "",
-    "test-file/test/index-spec.js.html#lineNumber56",
+    "test-file/test/index-spec.js.html#lineNumber64",
     "github-contribution-stats fetchContributions() should return valid contributions",
     "test"
   ],
   [
     "fetchstats src/index.js~fetchstats,fetchstats",
-    "test-file/test/index-spec.js.html#lineNumber26",
+    "test-file/test/index-spec.js.html#lineNumber27",
     "github-contribution-stats fetchStats()",
     "test"
   ],
   [
     "",
-    "test-file/test/index-spec.js.html#lineNumber35",
+    "test-file/test/index-spec.js.html#lineNumber36",
     "github-contribution-stats fetchStats() should return valid stats",
     "test"
   ],
   [
     "",
-    "test-file/test/index-spec.js.html#lineNumber41",
+    "test-file/test/index-spec.js.html#lineNumber42",
     "github-contribution-stats fetchStats() should return valid stats with summary option",
     "test"
   ],
   [
-    "fetchstreaks src/index.js~fetchstreaks,fetchstreaks",
-    "test-file/test/index-spec.js.html#lineNumber64",
-    "github-contribution-stats fetchStreaks()",
-    "test"
-  ],
-  [
     "",
-    "test-file/test/index-spec.js.html#lineNumber70",
-    "github-contribution-stats fetchStreaks() should return valid streaks",
+    "test-file/test/index-spec.js.html#lineNumber49",
+    "github-contribution-stats fetchStats() should return valid stats with unmeasurable contributions",
     "test"
   ],
   [
@@ -402,21 +390,15 @@ window.esdocSearchIndex = [
     "file"
   ],
   [
-    "src/index.js~currentstreak",
-    "typedef/index.html#static-typedef-CurrentStreak",
-    "src/index.js~CurrentStreak",
-    "typedef"
-  ],
-  [
-    "src/index.js~longeststreak",
-    "typedef/index.html#static-typedef-LongestStreak",
-    "src/index.js~LongestStreak",
-    "typedef"
-  ],
-  [
     "src/index.js~stats",
     "typedef/index.html#static-typedef-Stats",
     "src/index.js~Stats",
+    "typedef"
+  ],
+  [
+    "src/index.js~streak",
+    "typedef/index.html#static-typedef-Streak",
+    "src/index.js~Streak",
     "typedef"
   ],
   [

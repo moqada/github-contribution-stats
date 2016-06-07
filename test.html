@@ -34,10 +34,8 @@
     
   <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchContributions">fetchContributions</a></span></span></li>
 <li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStats">fetchStats</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-CurrentStreak">CurrentStreak</a></span></span></li>
-<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-LongestStreak">LongestStreak</a></span></span></li>
 <li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Stats">Stats</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-Streak">Streak</a></span></span></li>
 </ul>
 </div>
 </nav>
@@ -63,20 +61,26 @@
 
 
 <tr class="test-describe" data-ice="testDescribe" style="display: none;" data-test-depth="1">
-  <td data-ice="testDescription" style="padding-left: 20px"><span class="toggle closed"></span><span><a href="test-file/test/index-spec.js.html#lineNumber26"><p>fetchStats()</p>
+  <td data-ice="testDescription" style="padding-left: 20px"><span class="toggle closed"></span><span><a href="test-file/test/index-spec.js.html#lineNumber27"><p>fetchStats()</p>
 </a></span></td>
   <td data-ice="testTarget" class="test-target"><span><a href="function/index.html#static-function-fetchStats">fetchStats</a></span></td>
-  <td data-ice="testCount">2</td>
+  <td data-ice="testCount">3</td>
 </tr>
 
 <tr data-ice="testIt" style="display: none;" data-test-depth="2">
-  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber35"><p>should return valid stats</p>
+  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber36"><p>should return valid stats</p>
 </a></span></td>
   <td data-ice="testTarget" class="test-target">-</td>
   <td></td>
 </tr>
 <tr data-ice="testIt" style="display: none;" data-test-depth="2">
-  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber41"><p>should return valid stats with summary option</p>
+  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber42"><p>should return valid stats with summary option</p>
+</a></span></td>
+  <td data-ice="testTarget" class="test-target">-</td>
+  <td></td>
+</tr>
+<tr data-ice="testIt" style="display: none;" data-test-depth="2">
+  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber49"><p>should return valid stats with unmeasurable contributions</p>
 </a></span></td>
   <td data-ice="testTarget" class="test-target">-</td>
   <td></td>
@@ -84,29 +88,14 @@
 
 
 <tr class="test-describe" data-ice="testDescribe" style="display: none;" data-test-depth="1">
-  <td data-ice="testDescription" style="padding-left: 20px"><span class="toggle closed"></span><span><a href="test-file/test/index-spec.js.html#lineNumber50"><p>fetchContributions()</p>
+  <td data-ice="testDescription" style="padding-left: 20px"><span class="toggle closed"></span><span><a href="test-file/test/index-spec.js.html#lineNumber58"><p>fetchContributions()</p>
 </a></span></td>
   <td data-ice="testTarget" class="test-target"><span><a href="function/index.html#static-function-fetchContributions">fetchContributions</a></span></td>
   <td data-ice="testCount">1</td>
 </tr>
 
 <tr data-ice="testIt" style="display: none;" data-test-depth="2">
-  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber56"><p>should return valid contributions</p>
-</a></span></td>
-  <td data-ice="testTarget" class="test-target">-</td>
-  <td></td>
-</tr>
-
-
-<tr class="test-describe" data-ice="testDescribe" style="display: none;" data-test-depth="1">
-  <td data-ice="testDescription" style="padding-left: 20px"><span class="toggle closed"></span><span><a href="test-file/test/index-spec.js.html#lineNumber64"><p>fetchStreaks()</p>
-</a></span></td>
-  <td data-ice="testTarget" class="test-target"><span><a href="function/index.html#static-function-fetchStreaks">fetchStreaks</a></span></td>
-  <td data-ice="testCount">1</td>
-</tr>
-
-<tr data-ice="testIt" style="display: none;" data-test-depth="2">
-  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber70"><p>should return valid streaks</p>
+  <td data-ice="testDescription" style="padding-left: 30px"><span><a href="test-file/test/index-spec.js.html#lineNumber64"><p>should return valid contributions</p>
 </a></span></td>
   <td data-ice="testTarget" class="test-target">-</td>
   <td></td>
@@ -117,7 +106,7 @@
 </div>
 
 <footer class="footer">
-  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.3)</span></a>
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.4.7)</span></a>
 </footer>
 
 <script src="script/search_index.js"></script>
