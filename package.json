@@ -1,7 +1,7 @@
 {
   "name": "github-contribution-stats",
   "description": "Client of GitHub Contributions and Streaks",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "moqada <moqada@gmail.com>",
   "bugs": {
     "url": "https://github.com/moqada/github-contribution-stats/issues"
