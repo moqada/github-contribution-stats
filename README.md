@@ -44,12 +44,14 @@ fetchStats('moqada').then(stats => console.log(stats));
 //   currentStreak: {
 //     days: 139,
 //     end: '2016-01-22',
-//     start: '2015-09-06'
+//     start: '2015-09-06',
+//     unmeasurable: false
 //   },
 //   longestStreak: {
 //     days: 139,
 //     end: '2016-01-22',
-//     start: '2015-09-06'
+//     start: '2015-09-06',
+//     unmeasurable: false
 //   },
 //   summary: {
 //     busiestDay: {
@@ -59,29 +61,6 @@ fetchStats('moqada').then(stats => console.log(stats));
 //     end: '2016-01-23',
 //     start: '2015-01-23',
 //     total: 1271
-//   }
-// }
-```
-
-
-### Streaks
-
-Get uses's Streaks from GitHub.
-
-```javascript
-import {fetchStreaks} from 'github-contribution-stats';
-
-fetchStreaks('moqada').then(streaks => console.log(streaks));
-// {
-//   currentStreak: {
-//     days: 139,
-//     end: '2016-01-22',
-//     start: '2015-09-06'
-//   },
-//   longestStreak: {
-//     days: 139,
-//     end: '2016-01-22',
-//     start: '2015-09-06'
 //   }
 // }
 ```
