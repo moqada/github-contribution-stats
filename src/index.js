@@ -14,7 +14,7 @@ const STATUS_NOT_FOUND = 404;
  * @property {string} summary.end - End date of contributions
  * @property {string} summary.total - Total contributions
  * @property {?{date: string, count: number}} [summary.busiestDay] - Busiest day of contributions
- * @propety {string} [calendar] - SVG of contributions calendar
+ * @property {string} [calendar] - SVG of contributions calendar
  *
  * @example
  * {
